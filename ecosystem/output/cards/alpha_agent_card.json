@@ -1,0 +1,33 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "Front agent that talks to Beta using A2A protocol.",
+  "name": "Alpha Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Receives user input and delegates to Beta over A2A.",
+      "examples": [
+        "ask beta what you heard",
+        "delegate this to beta"
+      ],
+      "id": "alpha_broker",
+      "name": "Alpha Broker",
+      "tags": [
+        "broker",
+        "delegation",
+        "a2a"
+      ]
+    }
+  ],
+  "url": "http://127.0.0.1:8101/",
+  "version": "1.0.0"
+}

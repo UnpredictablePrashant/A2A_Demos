@@ -1,0 +1,115 @@
+2026-03-22 19:09:39,391 INFO Starting Beta agent process...
+2026-03-22 19:09:39,631 INFO HTTP Request: GET http://127.0.0.1:8102/.well-known/agent-card.json "HTTP/1.1 200 OK"
+2026-03-22 19:09:39,632 INFO Beta is ready.
+2026-03-22 19:09:39,632 INFO Starting Alpha agent process...
+2026-03-22 19:09:39,648 INFO HTTP Request: GET http://127.0.0.1:8101/.well-known/agent-card.json "HTTP/1.1 200 OK"
+2026-03-22 19:09:39,649 INFO Alpha is ready.
+2026-03-22 19:09:39,664 INFO HTTP Request: GET http://127.0.0.1:8101/.well-known/agent-card.json "HTTP/1.1 200 OK"
+2026-03-22 19:09:39,664 INFO Successfully fetched agent card data from http://127.0.0.1:8101/.well-known/agent-card.json: {'capabilities': {'streaming': True}, 'defaultInputModes': ['text'], 'defaultOutputModes': ['text'], 'description': 'Front agent that talks to Beta using A2A protocol.', 'name': 'Alpha Agent', 'preferredTransport': 'JSONRPC', 'protocolVersion': '0.3.0', 'skills': [{'description': 'Receives user input and delegates to Beta over A2A.', 'examples': ['ask beta what you heard', 'delegate this to beta'], 'id': 'alpha_broker', 'name': 'Alpha Broker', 'tags': ['broker', 'delegation', 'a2a']}], 'url': 'http://127.0.0.1:8101/', 'version': '1.0.0'}
+2026-03-22 19:09:39,668 INFO HTTP Request: GET http://127.0.0.1:8102/.well-known/agent-card.json "HTTP/1.1 200 OK"
+2026-03-22 19:09:39,669 INFO Successfully fetched agent card data from http://127.0.0.1:8102/.well-known/agent-card.json: {'capabilities': {'streaming': True}, 'defaultInputModes': ['text'], 'defaultOutputModes': ['text'], 'description': 'Receives A2A calls from Alpha and responds.', 'name': 'Beta Agent', 'preferredTransport': 'JSONRPC', 'protocolVersion': '0.3.0', 'skills': [{'description': 'Replies with a deterministic echo confirmation.', 'examples': ['hello beta', 'alpha asked me to ping you'], 'id': 'beta_echo', 'name': 'Beta Echo', 'tags': ['echo', 'demo', 'a2a']}], 'url': 'http://127.0.0.1:8102/', 'version': '1.0.0'}
+2026-03-22 19:09:39,670 INFO ALPHA_AGENT_CARD={
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "Front agent that talks to Beta using A2A protocol.",
+  "name": "Alpha Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Receives user input and delegates to Beta over A2A.",
+      "examples": [
+        "ask beta what you heard",
+        "delegate this to beta"
+      ],
+      "id": "alpha_broker",
+      "name": "Alpha Broker",
+      "tags": [
+        "broker",
+        "delegation",
+        "a2a"
+      ]
+    }
+  ],
+  "url": "http://127.0.0.1:8101/",
+  "version": "1.0.0"
+}
+2026-03-22 19:09:39,670 INFO BETA_AGENT_CARD={
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "Receives A2A calls from Alpha and responds.",
+  "name": "Beta Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Replies with a deterministic echo confirmation.",
+      "examples": [
+        "hello beta",
+        "alpha asked me to ping you"
+      ],
+      "id": "beta_echo",
+      "name": "Beta Echo",
+      "tags": [
+        "echo",
+        "demo",
+        "a2a"
+      ]
+    }
+  ],
+  "url": "http://127.0.0.1:8102/",
+  "version": "1.0.0"
+}
+2026-03-22 19:09:39,671 INFO USER_TO_ALPHA_SEND_MESSAGE_REQUEST={
+  "id": "da53ee9a-20a5-47c9-9559-6665de1be4ea",
+  "jsonrpc": "2.0",
+  "method": "message/send",
+  "params": {
+    "message": {
+      "kind": "message",
+      "messageId": "921ef6ca602d48a58a987a35b96cdd1e",
+      "parts": [
+        {
+          "kind": "text",
+          "text": "Please ask Beta what you received from me."
+        }
+      ],
+      "role": "user"
+    }
+  }
+}
+2026-03-22 19:09:39,893 INFO HTTP Request: POST http://127.0.0.1:8101/ "HTTP/1.1 200 OK"
+2026-03-22 19:09:39,894 INFO ALPHA_TO_USER_SEND_MESSAGE_RESPONSE={
+  "id": "da53ee9a-20a5-47c9-9559-6665de1be4ea",
+  "jsonrpc": "2.0",
+  "result": {
+    "kind": "message",
+    "messageId": "f70bcb32-f55e-4257-a619-baf90943fa80",
+    "parts": [
+      {
+        "kind": "text",
+        "text": "Alpha Agent response:\n- Your input: Please ask Beta what you received from me.\n- Beta replied: Beta Agent response:\\n- I received: Alpha forwarding: Please ask Beta what you received from me.\\n- I can confirm this was an A2A protocol call from Alpha."
+      }
+    ],
+    "role": "agent"
+  }
+}
+2026-03-22 19:09:39,895 INFO FINAL_TEXT_RESPONSE=Alpha Agent response:
+- Your input: Please ask Beta what you received from me.
+- Beta replied: Beta Agent response:\n- I received: Alpha forwarding: Please ask Beta what you received from me.\n- I can confirm this was an A2A protocol call from Alpha.
+2026-03-22 19:09:39,895 INFO Demo completed successfully. Logs written to D:\teaching\batch12\a2a\ecosystem\output\full_run.log
+2026-03-22 19:09:39,896 INFO Stopping agent processes...

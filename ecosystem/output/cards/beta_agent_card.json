@@ -1,0 +1,33 @@
+{
+  "capabilities": {
+    "streaming": true
+  },
+  "defaultInputModes": [
+    "text"
+  ],
+  "defaultOutputModes": [
+    "text"
+  ],
+  "description": "Receives A2A calls from Alpha and responds.",
+  "name": "Beta Agent",
+  "preferredTransport": "JSONRPC",
+  "protocolVersion": "0.3.0",
+  "skills": [
+    {
+      "description": "Replies with a deterministic echo confirmation.",
+      "examples": [
+        "hello beta",
+        "alpha asked me to ping you"
+      ],
+      "id": "beta_echo",
+      "name": "Beta Echo",
+      "tags": [
+        "echo",
+        "demo",
+        "a2a"
+      ]
+    }
+  ],
+  "url": "http://127.0.0.1:8102/",
+  "version": "1.0.0"
+}
