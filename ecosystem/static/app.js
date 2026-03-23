@@ -4,8 +4,7 @@ const runState = document.getElementById('run-state');
 const resultBox = document.getElementById('result-box');
 const submitBtn = document.getElementById('submit-btn');
 const eventStream = document.getElementById('event-stream');
-const alphaDb = document.getElementById('alpha-db');
-const betaDb = document.getElementById('beta-db');
+const dbSnapshot = document.getElementById('db-snapshot');
 const inspector = document.getElementById('inspector');
 const configTable = document.getElementById('config-table');
 const agentsTable = document.getElementById('agents-table');
@@ -140,23 +139,87 @@ function addEvent(event) {
   }
 }
 
-function renderAlphaTable(rows) {
-  alphaDb.innerHTML = '';
-  rows.forEach((row) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${row.local_id}</td><td title="${row.beta_task_id || ''}">${row.beta_task_id || ''}</td><td>${row.beta_status}</td><td title="${formatTs(row.created_at)}">${formatTs(row.created_at)}</td><td title="${formatTs(row.completed_at)}">${formatTs(row.completed_at)}</td>`;
-    tr.onclick = () => setInspector('Alpha DB Row', row);
-    alphaDb.appendChild(tr);
-  });
+function valueForCell(column, value) {
+  if (value === null || value === undefined || value === '') return '-';
+  if (column.endsWith('_at') && typeof value === 'number') return formatTs(value);
+  const text = String(value);
+  return text.length > 80 ? `${text.slice(0, 77)}...` : text;
 }
 
-function renderBetaTable(rows) {
-  betaDb.innerHTML = '';
-  rows.forEach((row) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td title="${row.task_id}">${row.task_id}</td><td>${row.status}</td><td>${row.source_agent}</td><td title="${formatTs(row.created_at)}">${formatTs(row.created_at)}</td><td title="${formatTs(row.completed_at)}">${formatTs(row.completed_at)}</td>`;
-    tr.onclick = () => setInspector('Beta DB Row', row);
-    betaDb.appendChild(tr);
+function prioritizeColumns(columns) {
+  const preferred = ['local_id', 'task_id', 'id', 'status', 'beta_status', 'source_agent', 'created_at', 'updated_at', 'completed_at'];
+  const ordered = [];
+  preferred.forEach((col) => {
+    if (columns.includes(col) && !ordered.includes(col)) ordered.push(col);
+  });
+  columns.forEach((col) => {
+    if (!ordered.includes(col)) ordered.push(col);
+  });
+  return ordered.slice(0, 8);
+}
+
+function renderDbSnapshot(data) {
+  dbSnapshot.innerHTML = '';
+  const agents = data?.agents || {};
+  const agentIds = Object.keys(agents).sort((a, b) => a.localeCompare(b));
+  if (!agentIds.length) {
+    const empty = document.createElement('div');
+    empty.innerHTML = '<p>No discovered agent databases yet.</p>';
+    dbSnapshot.appendChild(empty);
+    return;
+  }
+
+  agentIds.forEach((agentId) => {
+    const item = agents[agentId];
+    const rows = item?.rows || [];
+    const columns = prioritizeColumns(item?.columns || []);
+
+    const card = document.createElement('div');
+    const title = document.createElement('h3');
+    title.textContent = `${toTitle(agentId)} DB (\`${item?.table || `${agentId}_tasks`}\`)`;
+    card.appendChild(title);
+
+    const path = document.createElement('p');
+    path.textContent = item?.db_path || '';
+    path.style.opacity = '0.75';
+    path.style.margin = '0 0 8px';
+    path.style.fontSize = '12px';
+    card.appendChild(path);
+
+    if (!columns.length) {
+      const empty = document.createElement('p');
+      empty.textContent = 'Table missing or no columns yet.';
+      card.appendChild(empty);
+      dbSnapshot.appendChild(card);
+      return;
+    }
+
+    const table = document.createElement('table');
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    columns.forEach((col) => {
+      const th = document.createElement('th');
+      th.textContent = col;
+      headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.forEach((row) => {
+      const tr = document.createElement('tr');
+      columns.forEach((col) => {
+        const td = document.createElement('td');
+        td.textContent = valueForCell(col, row[col]);
+        td.title = row[col] === null || row[col] === undefined ? '' : String(row[col]);
+        tr.appendChild(td);
+      });
+      tr.onclick = () => setInspector(`${toTitle(agentId)} DB Row`, row);
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    card.appendChild(table);
+    dbSnapshot.appendChild(card);
   });
 }
 
@@ -176,8 +239,7 @@ async function refreshDb() {
     const res = await fetch('/api/db');
     if (!res.ok) return;
     const data = await res.json();
-    renderAlphaTable(data.alpha || []);
-    renderBetaTable(data.beta || []);
+    renderDbSnapshot(data);
     updateStatusSummary(data.summary || {});
   } catch (_) {
     // ignore transient errors

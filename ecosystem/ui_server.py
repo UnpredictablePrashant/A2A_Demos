@@ -37,8 +37,6 @@ from starlette.websockets import WebSocket
 
 ROOT = ROOT_DIR
 STATIC_DIR = ROOT / "ecosystem" / "static"
-ALPHA_DIR = ROOT / "agent_alpha"
-BETA_DIR = ROOT / "agent_beta"
 
 DEFAULT_ALPHA_URL = "http://127.0.0.1:8101"
 DEFAULT_BETA_URL = "http://127.0.0.1:8102"
@@ -173,6 +171,7 @@ class Orchestrator:
         self.last_detected_agents: set[str] = set()
         self.alpha_url: str = DEFAULT_ALPHA_URL
         self.beta_url: str = DEFAULT_BETA_URL
+        self.runtime_env: dict[str, str] = {}
 
     def _bool_from_env(self, value: str | None, default: bool) -> bool:
         if value is None:
@@ -182,6 +181,16 @@ class Orchestrator:
     def _discover_agents_from_env(self, env_map: dict[str, str]) -> list[dict[str, Any]]:
         by_id: dict[str, dict[str, Any]] = {}
 
+        def resolve_db_path(raw_path: str, agent_path: str) -> str:
+            path = Path(raw_path)
+            if path.is_absolute():
+                return str(path)
+            # Single filename -> agent-local DB file.
+            if len(path.parts) == 1:
+                return str((Path(agent_path) / path).resolve())
+            # Nested relative path -> treat as project-root-relative.
+            return str((ROOT / path).resolve())
+
         def get_row(agent_id: str) -> dict[str, Any]:
             key = agent_id.lower()
             if key not in by_id:
@@ -190,6 +199,8 @@ class Orchestrator:
                     "folder": f"agent_{key}",
                     "path": str((ROOT / f"agent_{key}").resolve()),
                     "url": "",
+                    "db_path": "",
+                    "db_table": f"{key}_tasks",
                     "managed": False,
                     "autostart": key in {"alpha", "beta"},
                     "has_app": False,
@@ -245,23 +256,40 @@ class Orchestrator:
                 row["autostart"] = self._bool_from_env(value, row["autostart"])
                 continue
 
-        if not by_id:
-            for path in sorted(ROOT.glob("agent_*")):
-                if not path.is_dir():
-                    continue
-                app_path = path / "app.py"
-                if not app_path.exists():
-                    continue
-                agent_id = path.name.replace("agent_", "").lower()
-                row = get_row(agent_id)
-                row["folder"] = path.name
-                row["path"] = str(path.resolve())
+            match = re.fullmatch(r"AGENT_([A-Z0-9_]+)_DB_PATH", key)
+            if match:
+                row = get_row(match.group(1).lower())
+                row["db_path"] = value
+                continue
+
+            match = re.fullmatch(r"([A-Z0-9_]+)_DB_PATH", key)
+            if match:
+                row = get_row(match.group(1).lower())
+                row["db_path"] = value
+                continue
+
+        for path in sorted(ROOT.glob("agent_*")):
+            if not path.is_dir():
+                continue
+            app_path = path / "app.py"
+            if not app_path.exists():
+                continue
+            agent_id = path.name.replace("agent_", "").lower()
+            row = get_row(agent_id)
+            row["folder"] = path.name
+            row["path"] = str(path.resolve())
+            if not row.get("db_path"):
+                row["db_path"] = str((path / f"{agent_id}_tasks.db").resolve())
 
         out: list[dict[str, Any]] = []
         for _, row in sorted(by_id.items(), key=lambda x: x[0]):
             app_path = Path(row["path"]) / "app.py"
             row["has_app"] = app_path.exists()
             row["managed"] = row["has_app"]
+            if row.get("db_path"):
+                row["db_path"] = resolve_db_path(str(row["db_path"]), str(row["path"]))
+            else:
+                row["db_path"] = str((Path(row["path"]) / f"{row['id']}_tasks.db").resolve())
             if row["has_app"]:
                 row["port"] = parse_port_from_app(app_path)
             if not row["url"] and row["port"]:
@@ -343,10 +371,6 @@ class Orchestrator:
     async def startup(self) -> None:
         self.loop = asyncio.get_event_loop()
 
-        # Ensure DB schemas are migrated before UI/API reads.
-        AlphaTaskRepository(str(ALPHA_DIR / "alpha_tasks.db"))
-        BetaTaskRepository(str(BETA_DIR / "beta_tasks.db"), task_delay_seconds=0)
-
         dotenv_values = load_dotenv(ENV_FILE)
         base_env = os.environ.copy()
         for key, value in dotenv_values.items():
@@ -358,8 +382,8 @@ class Orchestrator:
             "ALPHA_POLL_INTERVAL_SECONDS": "2",
             "ALPHA_MAX_POLL_ATTEMPTS": "5",
             "BETA_TASK_DELAY_SECONDS": "3",
-            "ALPHA_DB_PATH": str(ALPHA_DIR / "alpha_tasks.db"),
-            "BETA_DB_PATH": str(BETA_DIR / "beta_tasks.db"),
+            "ALPHA_DB_PATH": str((ROOT / "agent_alpha" / "alpha_tasks.db").resolve()),
+            "BETA_DB_PATH": str((ROOT / "agent_beta" / "beta_tasks.db").resolve()),
             "ALPHA_AGENT_URL": DEFAULT_ALPHA_URL,
             "BETA_AGENT_URL": DEFAULT_BETA_URL,
         }
@@ -378,7 +402,9 @@ class Orchestrator:
             {
                 key
                 for key in set(base_env.keys()) | set(dotenv_values.keys())
-                if "_AGENT_" in key.upper() or key.upper().startswith("AGENT_")
+                if "_AGENT_" in key.upper()
+                or key.upper().startswith("AGENT_")
+                or key.upper().endswith("_DB_PATH")
             }
         )
         for key in dynamic_agent_keys:
@@ -405,9 +431,37 @@ class Orchestrator:
                 }
             )
 
+        self.runtime_env = dict(base_env)
         self.agent_catalog = self._discover_agents_from_env(base_env)
+
+        # Keep DB path keys visible in config even when implicit defaults are used.
+        for item in self.agent_catalog:
+            db_key = f"{str(item.get('id', '')).upper()}_DB_PATH"
+            if db_key and db_key not in tracked_keys:
+                tracked_keys.append(db_key)
+                db_path = str(item.get("db_path", ""))
+                self.effective_config.append(
+                    {
+                        "key": db_key,
+                        "source": (
+                            "env"
+                            if db_key in os.environ
+                            else ".env"
+                            if db_key in dotenv_values
+                            else "default"
+                        ),
+                        "value": db_path,
+                    }
+                )
+
+        # Ensure DB schemas are migrated before UI/API reads (for built-in alpha/beta repos).
         alpha_row = next((x for x in self.agent_catalog if x["id"] == "alpha"), None)
         beta_row = next((x for x in self.agent_catalog if x["id"] == "beta"), None)
+        alpha_db_path = str(alpha_row.get("db_path", "")) if alpha_row else str((ROOT / "agent_alpha" / "alpha_tasks.db").resolve())
+        beta_db_path = str(beta_row.get("db_path", "")) if beta_row else str((ROOT / "agent_beta" / "beta_tasks.db").resolve())
+        AlphaTaskRepository(alpha_db_path)
+        BetaTaskRepository(beta_db_path, task_delay_seconds=0)
+
         self.alpha_url = str(alpha_row.get("url", "")) if alpha_row else base_env.get("ALPHA_AGENT_URL", DEFAULT_ALPHA_URL)
         self.beta_url = str(beta_row.get("url", "")) if beta_row else base_env.get("BETA_AGENT_URL", DEFAULT_BETA_URL)
         if not self.alpha_url:
@@ -426,6 +480,10 @@ class Orchestrator:
                 continue
 
             env_for_agent = dict(base_env)
+            agent_dotenv = load_dotenv(cwd / ".env")
+            for key, value in agent_dotenv.items():
+                if key not in os.environ:
+                    env_for_agent[key] = value
             if item["id"] == "alpha":
                 env_for_agent["BETA_AGENT_URL"] = self.beta_url
 
@@ -637,88 +695,67 @@ class Orchestrator:
         return alpha_text.split(marker, 1)[1].strip()
 
     def db_snapshot(self) -> dict[str, Any]:
-        def fetch_rows(
-            path: Path,
-            table: str,
-            desired_columns: list[str],
-            order_by: str,
-            limit: int = 20,
-        ) -> list[dict[str, Any]]:
+        def fetch_table(path: Path, table: str, limit: int = 20) -> dict[str, Any]:
             if not path.exists():
-                return []
+                return {"columns": [], "rows": [], "exists": False}
+
             with sqlite3.connect(path) as conn:
                 conn.row_factory = sqlite3.Row
                 cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-                col_names = {str(col[1]) for col in cols}
-                existing = [c for c in desired_columns if c in col_names]
-                if not existing:
-                    return []
-                if order_by not in col_names:
-                    order_by = existing[0]
+                col_names = [str(col[1]) for col in cols]
+                if not col_names:
+                    return {"columns": [], "rows": [], "exists": True}
+
+                preferred_order = ["created_at", "updated_at", "completed_at", "local_id", "task_id", "id"]
+                order_by = next((c for c in preferred_order if c in col_names), col_names[0])
                 query = (
-                    f"SELECT {', '.join(existing)} "
+                    f"SELECT {', '.join(col_names)} "
                     f"FROM {table} "
                     f"ORDER BY {order_by} DESC "
                     f"LIMIT {limit}"
                 )
                 rows = conn.execute(query).fetchall()
-            out: list[dict[str, Any]] = []
-            for row in rows:
-                row_dict = dict(row)
-                for col in desired_columns:
-                    row_dict.setdefault(col, None)
-                out.append(row_dict)
-            return out
+            return {"columns": col_names, "rows": [dict(row) for row in rows], "exists": True}
 
-        alpha_rows = fetch_rows(
-            ALPHA_DIR / "alpha_tasks.db",
-            "alpha_tasks",
-            [
-                "local_id",
-                "user_query",
-                "planner_brief",
-                "beta_task_id",
-                "beta_status",
-                "beta_result",
-                "beta_last_payload",
-                "created_at",
-                "updated_at",
-                "completed_at",
-            ],
-            "local_id",
-        )
-        beta_rows = fetch_rows(
-            BETA_DIR / "beta_tasks.db",
-            "beta_tasks",
-            [
-                "task_id",
-                "source_agent",
-                "user_query",
-                "planner_brief",
-                "status",
-                "result_text",
-                "error_text",
-                "created_at",
-                "ready_at",
-                "updated_at",
-                "completed_at",
-            ],
-            "created_at",
-        )
+        if not self.agent_catalog:
+            self.agent_catalog = self._discover_agents_from_env(self.runtime_env or os.environ)
+
+        agents_db: dict[str, Any] = {}
+        for item in self.agent_catalog:
+            agent_id = str(item.get("id", "")).lower()
+            if not agent_id:
+                continue
+            db_path = Path(str(item.get("db_path", "")))
+            table = str(item.get("db_table", f"{agent_id}_tasks"))
+            table_snapshot = fetch_table(db_path, table)
+            agents_db[agent_id] = {
+                "agent_id": agent_id,
+                "db_path": str(db_path),
+                "table": table,
+                "columns": table_snapshot["columns"],
+                "rows": table_snapshot["rows"],
+                "db_exists": table_snapshot["exists"],
+            }
+
+        alpha_rows = list(agents_db.get("alpha", {}).get("rows", []))
+        beta_rows = list(agents_db.get("beta", {}).get("rows", []))
+        alpha_latest = alpha_rows[0] if alpha_rows else {}
+        beta_latest = beta_rows[0] if beta_rows else {}
         summary = {
-            "alpha_status": alpha_rows[0]["beta_status"] if alpha_rows else "n/a",
-            "beta_status": beta_rows[0]["status"] if beta_rows else "n/a",
-            "beta_task_id": alpha_rows[0]["beta_task_id"] if alpha_rows else "",
-            "beta_result": beta_rows[0]["result_text"] if beta_rows else "",
-            "beta_error": beta_rows[0]["error_text"] if beta_rows else "",
-            "alpha_created_at": alpha_rows[0]["created_at"] if alpha_rows else None,
-            "alpha_completed_at": alpha_rows[0]["completed_at"] if alpha_rows else None,
-            "beta_created_at": beta_rows[0]["created_at"] if beta_rows else None,
-            "beta_completed_at": beta_rows[0]["completed_at"] if beta_rows else None,
+            "alpha_status": alpha_latest.get("beta_status", "n/a"),
+            "beta_status": beta_latest.get("status", "n/a"),
+            "beta_task_id": alpha_latest.get("beta_task_id", ""),
+            "beta_result": beta_latest.get("result_text", ""),
+            "beta_error": beta_latest.get("error_text", ""),
+            "alpha_created_at": alpha_latest.get("created_at"),
+            "alpha_completed_at": alpha_latest.get("completed_at"),
+            "beta_created_at": beta_latest.get("created_at"),
+            "beta_completed_at": beta_latest.get("completed_at"),
         }
         return {
             "alpha": alpha_rows,
             "beta": beta_rows,
+            "agents": agents_db,
             "summary": summary,
             "timestamp": time.time(),
         }

@@ -110,6 +110,11 @@ Use A2A app bootstrap and expose a unique port.
 Important: set explicit `port=<number>` in `uvicorn.run(...)`.
 The UI detection endpoint parser reads this port from `app.py`.
 
+Also load env in layered mode at startup:
+- first: `agent_<name>/.env`
+- fallback: project root `.env`
+- existing exported env vars still take precedence
+
 Example:
 
 ```python
@@ -166,15 +171,34 @@ For OpenAI-based agents, set:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL` (optional)
 
-## 5) Add Runtime Management (Optional but Recommended)
+If needed, set agent-local overrides in `agent_<name>/.env` while keeping shared defaults in root `.env`.
 
-Current UI server (`ecosystem/ui_server.py`) auto-detects all `agent_*` folders and checks detection status by probing each agent card URL.
+## 4.1 Skill Definition Checklist (Detailed)
 
-But it only auto-starts:
-- Alpha
-- Beta
+Avoid generic single-line skills. For each `AgentSkill`, define:
+- `id`: stable and namespaced (`<agent>_task_execution`, `<agent>_integration_contract`, etc.)
+- `name`: human-readable capability
+- `description`: clear contract (input shape, processing responsibility, output/error format)
+- `tags`: domain + behavior tags (`a2a`, `execute`, `tracking`, `integration`)
+- `examples`: realistic payload/prompt examples matching actual calls in executor
 
-If you want Gamma auto-started too, add a managed process in `Orchestrator.startup()` similar to Alpha/Beta.
+Recommended minimum skills:
+1. Task execution skill (core behavior).
+2. Task tracking/observability skill (status + DB lifecycle).
+3. Integration contract skill (actions, required fields, response schema).
+
+## 5) Runtime Management + Discovery
+
+Current UI server (`ecosystem/ui_server.py`) now discovers agents automatically by combining:
+- `.env` URL/path keys (`AGENT_<NAME>_URL` or `<NAME>_AGENT_URL`)
+- folders matching `agent_*` that contain `app.py`
+
+Autostart behavior is also config-driven:
+- default autostart: `alpha`, `beta`
+- override with `AGENT_<NAME>_AUTOSTART=true|false` (or `<NAME>_AGENT_AUTOSTART`)
+
+For best detection, add each new agent URL in `.env`:
+- `AGENT_GAMMA_URL=http://127.0.0.1:8103`
 
 ## 6) Connect New Agent into Flow
 

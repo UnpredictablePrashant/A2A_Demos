@@ -1,6 +1,9 @@
 import logging
+import sys
 
 import uvicorn
+
+from pathlib import Path
 
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -8,6 +11,12 @@ from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
 
 from agent_executor import BetaAgentExecutor
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+from agent_core.env_loader import load_env_chain
 
 
 def build_agent_card() -> AgentCard:
@@ -32,6 +41,7 @@ def build_agent_card() -> AgentCard:
 
 
 if __name__ == "__main__":
+    load_env_chain(agent_dir=Path(__file__).resolve().parent, root_dir=ROOT_DIR)
     logging.basicConfig(level=logging.INFO)
     card = build_agent_card()
 
