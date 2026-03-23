@@ -26,7 +26,6 @@ if str(ROOT_DIR) not in sys.path:
 from a2a.client import A2ACardResolver, A2AClient
 from a2a.types import Message, MessageSendParams, Part, Role, SendMessageRequest, TextPart
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH
-from agent_core.task_repositories import AlphaTaskRepository, BetaTaskRepository
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
@@ -38,11 +37,9 @@ from starlette.websockets import WebSocket
 ROOT = ROOT_DIR
 STATIC_DIR = ROOT / "ecosystem" / "static"
 
-DEFAULT_ALPHA_URL = "http://127.0.0.1:8101"
-DEFAULT_BETA_URL = "http://127.0.0.1:8102"
-
 LOGGER = logging.getLogger("ecosystem-ui")
 ENV_FILE = ROOT / ".env"
+ECOSYSTEM_DB_FILE = ROOT / "ecosystem" / "ecosystem.db"
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -163,20 +160,135 @@ class Orchestrator:
         self.subscribers: set[asyncio.Queue[dict[str, Any]]] = set()
         self.task_runs: dict[str, dict[str, Any]] = {}
         self.active_run_ids: set[str] = set()
-        self.alpha_proc: ManagedProcess | None = None
-        self.beta_proc: ManagedProcess | None = None
         self.managed_procs: dict[str, ManagedProcess] = {}
         self.effective_config: list[dict[str, str]] = []
         self.agent_catalog: list[dict[str, Any]] = []
         self.last_detected_agents: set[str] = set()
-        self.alpha_url: str = DEFAULT_ALPHA_URL
-        self.beta_url: str = DEFAULT_BETA_URL
         self.runtime_env: dict[str, str] = {}
+        self.entry_agent_id: str = ""
+        self.entry_agent_url: str = ""
+        self.ecosystem_db_path: Path = ECOSYSTEM_DB_FILE
 
     def _bool_from_env(self, value: str | None, default: bool) -> bool:
         if value is None:
             return default
         return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
+    def _init_ecosystem_db(self) -> None:
+        self.ecosystem_db_path.parent.mkdir(parents=True, exist_ok=True)
+        with sqlite3.connect(self.ecosystem_db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS poll_config (
+                    caller_agent TEXT NOT NULL,
+                    target_agent TEXT NOT NULL,
+                    poll_interval_seconds REAL NOT NULL,
+                    max_poll_attempts INTEGER NOT NULL,
+                    updated_at REAL NOT NULL,
+                    PRIMARY KEY (caller_agent, target_agent)
+                )
+                """
+            )
+            conn.commit()
+
+    def upsert_poll_config(
+        self,
+        caller_agent: str,
+        target_agent: str,
+        poll_interval_seconds: float,
+        max_poll_attempts: int,
+    ) -> None:
+        caller = caller_agent.strip().lower()
+        target = target_agent.strip().lower()
+        if not caller or not target:
+            raise ValueError("caller_agent and target_agent are required")
+        with sqlite3.connect(self.ecosystem_db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO poll_config (
+                    caller_agent, target_agent, poll_interval_seconds, max_poll_attempts, updated_at
+                ) VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(caller_agent, target_agent) DO UPDATE SET
+                    poll_interval_seconds = excluded.poll_interval_seconds,
+                    max_poll_attempts = excluded.max_poll_attempts,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    caller,
+                    target,
+                    float(poll_interval_seconds),
+                    int(max_poll_attempts),
+                    time.time(),
+                ),
+            )
+            conn.commit()
+
+    def get_poll_config_snapshot(self) -> dict[str, Any]:
+        default_interval = 20.0
+        default_attempts = 5
+        rows: list[dict[str, Any]] = []
+        if self.ecosystem_db_path.exists():
+            with sqlite3.connect(self.ecosystem_db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                fetched = conn.execute(
+                    """
+                    SELECT caller_agent, target_agent, poll_interval_seconds, max_poll_attempts, updated_at
+                    FROM poll_config
+                    ORDER BY caller_agent ASC, target_agent ASC
+                    """
+                ).fetchall()
+                rows = [dict(row) for row in fetched]
+
+        by_pair = {
+            (str(row.get("caller_agent", "")).lower(), str(row.get("target_agent", "")).lower()): row for row in rows
+        }
+        effective_rows: list[dict[str, Any]] = []
+        caller = self.entry_agent_id or "alpha"
+        known_targets = sorted(
+            {
+                str(item.get("id", "")).lower()
+                for item in self.agent_catalog
+                if str(item.get("id", "")).lower() and str(item.get("id", "")).lower() != caller
+            }
+        )
+        for target in known_targets:
+            existing = by_pair.get((caller, target))
+            effective_rows.append(
+                {
+                    "caller_agent": caller,
+                    "target_agent": target,
+                    "poll_interval_seconds": (
+                        float(existing.get("poll_interval_seconds", default_interval)) if existing else default_interval
+                    ),
+                    "max_poll_attempts": int(existing.get("max_poll_attempts", default_attempts)) if existing else default_attempts,
+                    "updated_at": existing.get("updated_at") if existing else None,
+                    "is_custom": bool(existing),
+                }
+            )
+
+        for row in rows:
+            pair = (str(row.get("caller_agent", "")).lower(), str(row.get("target_agent", "")).lower())
+            if not any(
+                str(item.get("caller_agent", "")).lower() == pair[0]
+                and str(item.get("target_agent", "")).lower() == pair[1]
+                for item in effective_rows
+            ):
+                effective_rows.append({**row, "is_custom": True})
+
+        effective_rows.sort(
+            key=lambda x: (
+                str(x.get("caller_agent", "")),
+                str(x.get("target_agent", "")),
+            )
+        )
+        return {
+            "entry_agent_id": self.entry_agent_id,
+            "default_poll_interval_seconds": default_interval,
+            "default_max_poll_attempts": default_attempts,
+            "db_path": str(self.ecosystem_db_path),
+            "rows": effective_rows,
+            "timestamp": time.time(),
+        }
 
     def _discover_agents_from_env(self, env_map: dict[str, str]) -> list[dict[str, Any]]:
         by_id: dict[str, dict[str, Any]] = {}
@@ -202,7 +314,9 @@ class Orchestrator:
                     "db_path": "",
                     "db_table": f"{key}_tasks",
                     "managed": False,
-                    "autostart": key in {"alpha", "beta"},
+                    # Keep startup behavior uniform across all agents.
+                    # Any agent starts only when explicitly configured via *_AUTOSTART=true.
+                    "autostart": False,
                     "has_app": False,
                     "port": None,
                 }
@@ -298,13 +412,11 @@ class Orchestrator:
         return out
 
     def _event_kind(self, msg: str) -> str:
-        if "ALPHA_TO_BETA_SEND_MESSAGE_REQUEST" in msg:
+        if re.search(r"[A-Z]+_TO_[A-Z]+_SEND_MESSAGE_(REQUEST|RESPONSE)", msg):
             return "transfer"
-        if "BETA_TO_ALPHA_SEND_MESSAGE_RESPONSE" in msg:
-            return "transfer"
-        if "BETA_SENDING_RESPONSE_TEXT" in msg:
+        if re.search(r"[A-Z]+_SENDING_RESPONSE_TEXT", msg):
             return "task"
-        if "ALPHA_FINAL_RESPONSE_TEXT" in msg:
+        if re.search(r"[A-Z]+_FINAL_RESPONSE_TEXT", msg):
             return "task"
         if "OPENAI" in msg:
             return "llm"
@@ -323,15 +435,37 @@ class Orchestrator:
                     "type": match.group(3).lower(),
                 }
             )
-        if "BETA_SENDING_RESPONSE_TEXT" in message:
-            links.append({"from": "beta", "to": "beta_db", "type": "db_write"})
-            links.append({"from": "beta_db", "to": "alpha", "type": "db_status"})
-        if "ALPHA_FINAL_RESPONSE_TEXT" in message:
-            links.append({"from": "alpha", "to": "alpha_db", "type": "db_write"})
-            links.append({"from": "alpha", "to": "user", "type": "final"})
+        sender_match = re.search(r"([A-Z]+)_SENDING_RESPONSE_TEXT", message)
+        if sender_match:
+            sender = sender_match.group(1).lower()
+            links.append({"from": sender, "to": f"{sender}_db", "type": "db_write"})
+            if self.entry_agent_id and sender != self.entry_agent_id:
+                links.append({"from": f"{sender}_db", "to": self.entry_agent_id, "type": "db_status"})
+        final_match = re.search(r"([A-Z]+)_FINAL_RESPONSE_TEXT", message)
+        if final_match:
+            sender = final_match.group(1).lower()
+            links.append({"from": sender, "to": f"{sender}_db", "type": "db_write"})
+            links.append({"from": sender, "to": "user", "type": "final"})
         if message.startswith("New task submitted:"):
-            links.append({"from": "user", "to": "alpha", "type": "submit"})
+            links.append({"from": "user", "to": self.entry_agent_id or "agent", "type": "submit"})
         return links
+
+    def _resolve_entry_agent(self, env_map: dict[str, str]) -> tuple[str, str]:
+        preferred = str(env_map.get("ORCH_ENTRY_AGENT", "") or env_map.get("ECOSYSTEM_ENTRY_AGENT", "")).strip().lower()
+        by_id = {str(item.get("id", "")).lower(): item for item in self.agent_catalog}
+        if preferred:
+            preferred_row = by_id.get(preferred)
+            if preferred_row and preferred_row.get("url"):
+                return preferred, str(preferred_row.get("url", ""))
+
+        candidates = sorted(
+            [item for item in self.agent_catalog if str(item.get("url", "")).strip()],
+            key=lambda x: str(x.get("id", "")),
+        )
+        if not candidates:
+            return "", ""
+        first = candidates[0]
+        return str(first.get("id", "")).lower(), str(first.get("url", ""))
 
     def _add_event(
         self, source: str, message: str, kind: str | None = None, run_id: str | None = None
@@ -379,24 +513,15 @@ class Orchestrator:
 
         defaults = {
             "OPENAI_MODEL": "gpt-4.1-mini",
-            "ALPHA_POLL_INTERVAL_SECONDS": "2",
-            "ALPHA_MAX_POLL_ATTEMPTS": "5",
-            "BETA_TASK_DELAY_SECONDS": "3",
-            "ALPHA_DB_PATH": str((ROOT / "agent_alpha" / "alpha_tasks.db").resolve()),
-            "BETA_DB_PATH": str((ROOT / "agent_beta" / "beta_tasks.db").resolve()),
-            "ALPHA_AGENT_URL": DEFAULT_ALPHA_URL,
-            "BETA_AGENT_URL": DEFAULT_BETA_URL,
+            "ORCH_ENTRY_AGENT": "",
+            "ECOSYSTEM_DB_PATH": str(ECOSYSTEM_DB_FILE.resolve()),
         }
         tracked_keys = [
             "OPENAI_API_KEY",
             "OPENAI_MODEL",
-            "ALPHA_POLL_INTERVAL_SECONDS",
-            "ALPHA_MAX_POLL_ATTEMPTS",
-            "BETA_TASK_DELAY_SECONDS",
-            "ALPHA_DB_PATH",
-            "BETA_DB_PATH",
-            "ALPHA_AGENT_URL",
-            "BETA_AGENT_URL",
+            "ORCH_ENTRY_AGENT",
+            "ECOSYSTEM_ENTRY_AGENT",
+            "ECOSYSTEM_DB_PATH",
         ]
         dynamic_agent_keys = sorted(
             {
@@ -405,6 +530,9 @@ class Orchestrator:
                 if "_AGENT_" in key.upper()
                 or key.upper().startswith("AGENT_")
                 or key.upper().endswith("_DB_PATH")
+                or "_POLL_" in key.upper()
+                or key.upper().endswith("_MAX_POLL_ATTEMPTS")
+                or key.upper().endswith("_TASK_DELAY_SECONDS")
             }
         )
         for key in dynamic_agent_keys:
@@ -432,7 +560,12 @@ class Orchestrator:
             )
 
         self.runtime_env = dict(base_env)
+        self.ecosystem_db_path = Path(
+            str(base_env.get("ECOSYSTEM_DB_PATH", str(ECOSYSTEM_DB_FILE.resolve())))
+        ).resolve()
+        self._init_ecosystem_db()
         self.agent_catalog = self._discover_agents_from_env(base_env)
+        self.entry_agent_id, self.entry_agent_url = self._resolve_entry_agent(base_env)
 
         # Keep DB path keys visible in config even when implicit defaults are used.
         for item in self.agent_catalog:
@@ -454,24 +587,9 @@ class Orchestrator:
                     }
                 )
 
-        # Ensure DB schemas are migrated before UI/API reads (for built-in alpha/beta repos).
-        alpha_row = next((x for x in self.agent_catalog if x["id"] == "alpha"), None)
-        beta_row = next((x for x in self.agent_catalog if x["id"] == "beta"), None)
-        alpha_db_path = str(alpha_row.get("db_path", "")) if alpha_row else str((ROOT / "agent_alpha" / "alpha_tasks.db").resolve())
-        beta_db_path = str(beta_row.get("db_path", "")) if beta_row else str((ROOT / "agent_beta" / "beta_tasks.db").resolve())
-        AlphaTaskRepository(alpha_db_path)
-        BetaTaskRepository(beta_db_path, task_delay_seconds=0)
-
-        self.alpha_url = str(alpha_row.get("url", "")) if alpha_row else base_env.get("ALPHA_AGENT_URL", DEFAULT_ALPHA_URL)
-        self.beta_url = str(beta_row.get("url", "")) if beta_row else base_env.get("BETA_AGENT_URL", DEFAULT_BETA_URL)
-        if not self.alpha_url:
-            self.alpha_url = base_env.get("ALPHA_AGENT_URL", DEFAULT_ALPHA_URL)
-        if not self.beta_url:
-            self.beta_url = base_env.get("BETA_AGENT_URL", DEFAULT_BETA_URL)
-
         start_order = sorted(
             [x for x in self.agent_catalog if x.get("managed") and x.get("autostart")],
-            key=lambda x: (0 if x["id"] == "beta" else 1 if x["id"] == "alpha" else 2, x["id"]),
+            key=lambda x: str(x.get("id", "")),
         )
         self.managed_procs = {}
         for item in start_order:
@@ -484,8 +602,6 @@ class Orchestrator:
             for key, value in agent_dotenv.items():
                 if key not in os.environ:
                     env_for_agent[key] = value
-            if item["id"] == "alpha":
-                env_for_agent["BETA_AGENT_URL"] = self.beta_url
 
             proc = ManagedProcess(
                 name=str(item["id"]),
@@ -501,9 +617,7 @@ class Orchestrator:
             if agent_url:
                 await wait_for_endpoint(agent_url)
                 self._add_event("system", f"{item['id']} is ready", "task")
-
-        self.alpha_proc = self.managed_procs.get("alpha")
-        self.beta_proc = self.managed_procs.get("beta")
+        self.entry_agent_id, self.entry_agent_url = self._resolve_entry_agent(base_env)
 
     async def shutdown(self) -> None:
         self._add_event("system", "Stopping agents", "task")
@@ -566,11 +680,14 @@ class Orchestrator:
 
     async def submit_user_task(self, text: str) -> str:
         run_id = uuid4().hex
+        if not self.entry_agent_url:
+            self.entry_agent_id, self.entry_agent_url = self._resolve_entry_agent(self.runtime_env or os.environ)
         self.task_runs[run_id] = {
             "id": run_id,
             "input": text,
             "status": "running",
             "result": "",
+            "entry_agent": self.entry_agent_id,
             "created_at": time.time(),
             "updated_at": time.time(),
             "events": [],
@@ -582,10 +699,13 @@ class Orchestrator:
     async def _run_task(self, run_id: str, text: str) -> None:
         self.active_run_ids.add(run_id)
         try:
+            if not self.entry_agent_url:
+                raise RuntimeError("No entry agent URL found. Set ORCH_ENTRY_AGENT or configure at least one *_AGENT_URL.")
+
             async with httpx.AsyncClient(timeout=60.0) as httpx_client:
-                alpha_resolver = A2ACardResolver(httpx_client=httpx_client, base_url=self.alpha_url)
-                alpha_card = await alpha_resolver.get_agent_card()
-                client = A2AClient(httpx_client=httpx_client, agent_card=alpha_card)
+                entry_resolver = A2ACardResolver(httpx_client=httpx_client, base_url=self.entry_agent_url)
+                entry_card = await entry_resolver.get_agent_card()
+                client = A2AClient(httpx_client=httpx_client, agent_card=entry_card)
 
                 send_params = MessageSendParams(
                     message=Message(
@@ -597,7 +717,10 @@ class Orchestrator:
                 request = SendMessageRequest(id=str(uuid4()), params=send_params)
                 self._add_event(
                     "user",
-                    f"USER_TO_ALPHA_SEND_MESSAGE_REQUEST={request.model_dump_json(indent=2, exclude_none=True)}",
+                    (
+                        f"USER_TO_{self.entry_agent_id.upper()}_SEND_MESSAGE_REQUEST="
+                        f"{request.model_dump_json(indent=2, exclude_none=True)}"
+                    ),
                     "transfer",
                     run_id=run_id,
                 )
@@ -613,7 +736,10 @@ class Orchestrator:
                 )
                 self._add_event(
                     "user",
-                    f"ALPHA_TO_USER_SEND_MESSAGE_RESPONSE={response.model_dump_json(indent=2, exclude_none=True)}",
+                    (
+                        f"{self.entry_agent_id.upper()}_TO_USER_SEND_MESSAGE_RESPONSE="
+                        f"{response.model_dump_json(indent=2, exclude_none=True)}"
+                    ),
                     "transfer",
                     run_id=run_id,
                 )
@@ -688,23 +814,20 @@ class Orchestrator:
         ]
         return {"nodes": node_rows, "edges": edge_rows, "events": events[-120:]}
 
-    def _extract_story_result(self, alpha_text: str) -> str:
-        marker = "- Story result:"
-        if marker not in alpha_text:
-            return ""
-        return alpha_text.split(marker, 1)[1].strip()
-
     def db_snapshot(self) -> dict[str, Any]:
         def fetch_table(path: Path, table: str, limit: int = 20) -> dict[str, Any]:
             if not path.exists():
-                return {"columns": [], "rows": [], "exists": False}
+                return {"columns": [], "rows": [], "exists": False, "row_count": 0}
 
             with sqlite3.connect(path) as conn:
                 conn.row_factory = sqlite3.Row
                 cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
                 col_names = [str(col[1]) for col in cols]
                 if not col_names:
-                    return {"columns": [], "rows": [], "exists": True}
+                    return {"columns": [], "rows": [], "exists": True, "row_count": 0}
+
+                count_row = conn.execute(f"SELECT COUNT(*) AS c FROM {table}").fetchone()
+                row_count = int(count_row["c"]) if count_row and "c" in count_row.keys() else 0
 
                 preferred_order = ["created_at", "updated_at", "completed_at", "local_id", "task_id", "id"]
                 order_by = next((c for c in preferred_order if c in col_names), col_names[0])
@@ -715,7 +838,7 @@ class Orchestrator:
                     f"LIMIT {limit}"
                 )
                 rows = conn.execute(query).fetchall()
-            return {"columns": col_names, "rows": [dict(row) for row in rows], "exists": True}
+            return {"columns": col_names, "rows": [dict(row) for row in rows], "exists": True, "row_count": row_count}
 
         if not self.agent_catalog:
             self.agent_catalog = self._discover_agents_from_env(self.runtime_env or os.environ)
@@ -735,26 +858,50 @@ class Orchestrator:
                 "columns": table_snapshot["columns"],
                 "rows": table_snapshot["rows"],
                 "db_exists": table_snapshot["exists"],
+                "row_count": table_snapshot["row_count"],
             }
 
-        alpha_rows = list(agents_db.get("alpha", {}).get("rows", []))
-        beta_rows = list(agents_db.get("beta", {}).get("rows", []))
-        alpha_latest = alpha_rows[0] if alpha_rows else {}
-        beta_latest = beta_rows[0] if beta_rows else {}
+        summary_agents: list[dict[str, Any]] = []
+        for agent_id in sorted(agents_db.keys()):
+            rows = list(agents_db.get(agent_id, {}).get("rows", []))
+            latest = rows[0] if rows else {}
+            latest_keys = list(latest.keys())
+            status_key = next((k for k in ["status", "state"] if k in latest), "")
+            if not status_key:
+                status_key = next((k for k in latest_keys if k.endswith("_status")), "")
+            task_key = next((k for k in ["task_id", "local_id", "id"] if k in latest), "")
+            if not task_key:
+                task_key = next((k for k in latest_keys if k.endswith("_task_id")), "")
+            result_key = next((k for k in ["result_text", "result"] if k in latest), "")
+            if not result_key:
+                result_key = next((k for k in latest_keys if k.endswith("_result")), "")
+            error_key = next((k for k in ["error_text", "error"] if k in latest), "")
+            if not error_key:
+                error_key = next((k for k in latest_keys if k.endswith("_error")), "")
+            summary_agents.append(
+                {
+                    "agent_id": agent_id,
+                    "status": latest.get(status_key, "n/a") if status_key else "n/a",
+                    "task_id": str(latest.get(task_key, "")) if task_key else "",
+                    "result_text": latest.get(result_key, "") if result_key else "",
+                    "error_text": latest.get(error_key, "") if error_key else "",
+                    "created_at": latest.get("created_at"),
+                    "completed_at": latest.get("completed_at"),
+                    "updated_at": latest.get("updated_at"),
+                }
+            )
+
+        primary = next(
+            (x for x in summary_agents if x.get("agent_id") == self.entry_agent_id),
+            summary_agents[0] if summary_agents else {},
+        )
         summary = {
-            "alpha_status": alpha_latest.get("beta_status", "n/a"),
-            "beta_status": beta_latest.get("status", "n/a"),
-            "beta_task_id": alpha_latest.get("beta_task_id", ""),
-            "beta_result": beta_latest.get("result_text", ""),
-            "beta_error": beta_latest.get("error_text", ""),
-            "alpha_created_at": alpha_latest.get("created_at"),
-            "alpha_completed_at": alpha_latest.get("completed_at"),
-            "beta_created_at": beta_latest.get("created_at"),
-            "beta_completed_at": beta_latest.get("completed_at"),
+            "entry_agent": self.entry_agent_id or None,
+            "entry_agent_url": self.entry_agent_url or None,
+            "agents": summary_agents,
+            "primary": primary,
         }
         return {
-            "alpha": alpha_rows,
-            "beta": beta_rows,
             "agents": agents_db,
             "summary": summary,
             "timestamp": time.time(),
@@ -797,6 +944,48 @@ async def config_state(_: Request) -> JSONResponse:
     return JSONResponse({"config": ORCH.effective_config, "env_file": str(ENV_FILE)})
 
 
+async def polling_config_state(_: Request) -> JSONResponse:
+    return JSONResponse(ORCH.get_poll_config_snapshot())
+
+
+async def update_polling_config(request: Request) -> JSONResponse:
+    payload = await request.json()
+    caller_agent = str(payload.get("caller_agent") or ORCH.entry_agent_id or "alpha").strip().lower()
+    target_agent = str(payload.get("target_agent", "")).strip().lower()
+    if not target_agent:
+        return JSONResponse({"error": "target_agent is required"}, status_code=400)
+    if caller_agent == target_agent:
+        return JSONResponse({"error": "caller_agent and target_agent must differ"}, status_code=400)
+
+    try:
+        poll_interval_seconds = float(payload.get("poll_interval_seconds", 20.0))
+        max_poll_attempts = int(payload.get("max_poll_attempts", 5))
+    except Exception:
+        return JSONResponse({"error": "poll_interval_seconds/max_poll_attempts must be numeric"}, status_code=400)
+
+    if poll_interval_seconds <= 0:
+        return JSONResponse({"error": "poll_interval_seconds must be > 0"}, status_code=400)
+    if max_poll_attempts <= 0:
+        return JSONResponse({"error": "max_poll_attempts must be > 0"}, status_code=400)
+
+    ORCH.upsert_poll_config(
+        caller_agent=caller_agent,
+        target_agent=target_agent,
+        poll_interval_seconds=poll_interval_seconds,
+        max_poll_attempts=max_poll_attempts,
+    )
+    ORCH._add_event(
+        "system",
+        (
+            "POLL_CONFIG_UPDATED "
+            f"caller={caller_agent} target={target_agent} "
+            f"interval={poll_interval_seconds} attempts={max_poll_attempts}"
+        ),
+        kind="task",
+    )
+    return JSONResponse(ORCH.get_poll_config_snapshot())
+
+
 async def agents_state(_: Request) -> JSONResponse:
     return JSONResponse(await ORCH.agents_snapshot())
 
@@ -821,12 +1010,13 @@ async def session_state(request: Request) -> JSONResponse:
                 "input": run.get("input"),
                 "status": run.get("status"),
                 "result": run.get("result"),
-                "beta_result": ORCH._extract_story_result(str(run.get("result", ""))),
+                "entry_agent": run.get("entry_agent"),
                 "created_at": run.get("created_at"),
                 "updated_at": run.get("updated_at"),
             },
             "detected_agents": sorted(detected),
             "graph": graph,
+            "db_summary": ORCH.db_snapshot().get("summary", {}),
             "timestamp": time.time(),
         }
     )
@@ -855,6 +1045,8 @@ routes = [
     Route("/api/tasks/{run_id}", task_status, methods=["GET"]),
     Route("/api/db", db_state, methods=["GET"]),
     Route("/api/config", config_state, methods=["GET"]),
+    Route("/api/polling-config", polling_config_state, methods=["GET"]),
+    Route("/api/polling-config", update_polling_config, methods=["POST"]),
     Route("/api/agents", agents_state, methods=["GET"]),
     Route("/api/sessions", sessions_state, methods=["GET"]),
     Route("/api/sessions/{run_id}", session_state, methods=["GET"]),

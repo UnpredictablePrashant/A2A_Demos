@@ -1,4 +1,4 @@
-# Sigma Agent
+# Gamma Agent
 
 This agent was scaffolded with `ecosystem/create_agent.py`.
 
@@ -10,20 +10,21 @@ python3 app.py
 
 ## Endpoints
 
-- Card: `http://127.0.0.1:8114/.well-known/agent-card.json`
+- Card: `http://127.0.0.1:8103/.well-known/agent-card.json`
 
 ## Optional Environment Variables
 
 - `OPENAI_API_KEY` (needed when created with `--with-openai`)
 - `OPENAI_MODEL` (default: `gpt-4.1-mini`)
-- `AGENT_SIGMA_URL` (agent card base URL used by the ecosystem UI)
-- `SIGMA_AGENT_URL` (alternate URL key format; either key works)
-- `SIGMA_DB_PATH` (SQLite path for this agent's task DB)
+- `AGENT_GAMMA_URL` (agent card base URL used by the ecosystem UI)
+- `GAMMA_AGENT_URL` (alternate URL key format; either key works)
+- `GAMMA_DB_PATH` (SQLite path for this agent's task DB)
+- `GAMMA_TASK_DELAY_SECONDS` (default task delay before completion is attempted)
 
 ## Env Resolution Order
 
 At startup, this agent loads env files in this order:
-1. `agent_sigma/.env` (highest file priority)
+1. `agent_gamma/.env` (highest file priority)
 2. project root `.env` (fallback for missing keys)
 3. already-exported process env vars (highest overall priority)
 
@@ -32,7 +33,7 @@ Use this to keep agent-specific overrides local while still inheriting shared ro
 ## Skill Blueprint (What To Define Clearly)
 
 When adding or editing skills in `app.py`, define each skill with:
-- `id`: stable machine-friendly identifier (`sigma_...`)
+- `id`: stable machine-friendly identifier (`gamma_...`)
 - `name`: clear operator-facing name
 - `description`: task scope, expected input shape, and output contract
 - `tags`: capability keywords (`a2a`, domain, execution type, storage)
@@ -58,7 +59,7 @@ Do not keep skill descriptions generic; document exact contracts used by your ex
 - `id`:
   - unique stable identifier for the skill
   - should not change frequently, because clients may depend on it
-  - recommended format: `sigma_<capability>`
+  - recommended format: `gamma_<capability>`
 - `name`:
   - short human-readable title
   - shown in agent cards and UI lists
@@ -79,28 +80,30 @@ Practical rule:
 
 When you run `python3 app.py`, the sequence is:
 
-1. `app.py` builds the A2A server and creates `SigmaAgentExecutor()`.
-2. In `agent_executor.py`, `__init__` sets `self.db_path` from `SIGMA_DB_PATH`.
+1. `app.py` builds the A2A server and creates `GammaAgentExecutor()`.
+2. In `agent_executor.py`, `__init__` sets `self.db_path` from `GAMMA_DB_PATH`.
 3. `__init__` calls `_init_db()`.
-4. `_init_db()` runs `CREATE TABLE IF NOT EXISTS sigma_tasks (...)`.
+4. `_init_db()` runs `CREATE TABLE IF NOT EXISTS gamma_tasks (...)`.
 5. On each incoming request, `execute(...)`:
-   - writes a new DB row (`_insert_task`) with `created_at`/`updated_at`
-   - performs processing (LLM or business logic)
-   - updates row status + `completed_at` (`_complete_task` or `_finish_task`)
-   - returns response to caller
+   - accepts `submit_task` and `get_task_status` actions
+   - writes new rows on submit (`queued` -> `in_progress` -> terminal state)
+   - processes work when polled and `ready_at` is reached
+   - returns `task_status_result` with `result` or `error` fields on terminal states
 
 This means DB file/table are auto-created the first time the executor starts.
 
 ## Current Table
 
-Default table name: `sigma_tasks`
+Default table name: `gamma_tasks`
 
 Typical columns:
-- `id` primary key
-- `input_text`
+- `task_id` primary key
+- `source_agent`
+- `request_text`
+- `user_query`
 - `status`
-- `result_text` (and `error_text` for OpenAI template)
-- `created_at`, `updated_at`, `completed_at`
+- `result_text`, `error_text`
+- `created_at`, `ready_at`, `updated_at`, `completed_at`
 
 ## Verify DB Quickly
 
@@ -108,13 +111,13 @@ Typical columns:
 python3 app.py
 python3 - <<'PY'
 import sqlite3
-conn = sqlite3.connect('sigma_tasks.db')
-print(conn.execute("PRAGMA table_info(sigma_tasks)").fetchall())
+conn = sqlite3.connect('gamma_tasks.db')
+print(conn.execute("PRAGMA table_info(gamma_tasks)").fetchall())
 conn.close()
 PY
 ```
 
-If you set `SIGMA_DB_PATH` in `.env`, check that custom path instead.
+If you set `GAMMA_DB_PATH` in `.env`, check that custom path instead.
 
 ## How To Modify Safely
 
@@ -141,7 +144,7 @@ In insert:
 
 ```python
 conn.execute(
-    "INSERT INTO sigma_tasks (input_text, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+    "INSERT INTO gamma_tasks (input_text, status, payload_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
     (input_text, "in_progress", raw_json, now, now),
 )
 ```
@@ -149,7 +152,7 @@ conn.execute(
 ## Recommended Next Upgrade
 
 If you want production-grade structure, move DB logic into:
-- `agent_sigma/task_repository.py` (all SQL only)
+- `agent_gamma/task_repository.py` (all SQL only)
 - `agent_executor.py` (business logic only)
 
 This keeps agent behavior easier to evolve and test.

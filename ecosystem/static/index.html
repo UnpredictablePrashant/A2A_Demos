@@ -10,7 +10,7 @@
     <div class="bg-grid"></div>
     <header class="hero">
       <h1>A2A Live Execution Console</h1>
-      <p>Submit a user task and watch Alpha/Beta coordination, message transfer, and SQLite state updates in real time.</p>
+      <p>Submit a user task and watch agent coordination, message transfer, and SQLite state updates in real time.</p>
     </header>
 
     <main class="layout">
@@ -30,22 +30,25 @@
         <h2>Task Status Monitor</h2>
         <div class="status-grid">
           <div class="status-card"><span>Run Id</span><strong id="status-run-id">-</strong></div>
-          <div class="status-card"><span>Alpha Status</span><strong id="status-alpha">n/a</strong></div>
-          <div class="status-card"><span>Beta Task Id</span><strong id="status-beta-task">-</strong></div>
-          <div class="status-card"><span>Beta Status</span><strong id="status-beta">n/a</strong></div>
-          <div class="status-card"><span>Alpha Created</span><strong id="status-alpha-created">-</strong></div>
-          <div class="status-card"><span>Alpha Completed</span><strong id="status-alpha-completed">-</strong></div>
-          <div class="status-card"><span>Beta Created</span><strong id="status-beta-created">-</strong></div>
-          <div class="status-card"><span>Beta Completed</span><strong id="status-beta-completed">-</strong></div>
+          <div class="status-card"><span>Run Status</span><strong id="status-run-status">n/a</strong></div>
+          <div class="status-card"><span>Entry Agent</span><strong id="status-entry-agent">n/a</strong></div>
+          <div class="status-card"><span>Detected Agents</span><strong id="status-detected-agents">0</strong></div>
+          <div class="status-card"><span>Last Updated</span><strong id="status-last-updated">-</strong></div>
         </div>
+        <table>
+          <thead>
+            <tr><th>agent</th><th>status</th><th>task_id</th><th>created</th><th>completed</th></tr>
+          </thead>
+          <tbody id="status-agents-table"></tbody>
+        </table>
         <div class="status-outputs">
           <div>
-            <h3>Alpha Final Output</h3>
-            <pre id="alpha-output" class="output-box"></pre>
+            <h3>Run Final Output</h3>
+            <pre id="run-output" class="output-box"></pre>
           </div>
           <div>
-            <h3>Beta Worker Output</h3>
-            <pre id="beta-output" class="output-box"></pre>
+            <h3>Latest DB Agent Result</h3>
+            <pre id="db-output" class="output-box"></pre>
           </div>
         </div>
       </section>
@@ -115,6 +118,17 @@
             <tr><th>id</th><th>folder</th><th>process</th><th>detected</th><th>url</th></tr>
           </thead>
           <tbody id="agents-table"></tbody>
+        </table>
+      </section>
+
+      <section class="panel panel-polling">
+        <h2>Polling Configuration</h2>
+        <p class="agents-note">Default interval is 20 seconds. Configure caller-target polling here; values are stored in ecosystem DB.</p>
+        <table>
+          <thead>
+            <tr><th>caller</th><th>target</th><th>interval (s)</th><th>max attempts</th><th>source</th><th>action</th></tr>
+          </thead>
+          <tbody id="polling-table"></tbody>
         </table>
       </section>
 

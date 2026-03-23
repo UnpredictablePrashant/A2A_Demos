@@ -93,7 +93,8 @@ body {
   grid-column: 1 / -1;
 }
 
-.panel-agent-registry {
+.panel-agent-registry,
+.panel-polling {
   grid-column: 1 / -1;
 }
 
@@ -129,6 +130,21 @@ button {
 
 button:hover {
   transform: translateY(-1px);
+}
+
+.panel-polling input {
+  width: 100%;
+  min-width: 84px;
+  border-radius: 8px;
+  border: 1px solid #33507e;
+  background: #0d1b31;
+  color: var(--text);
+  padding: 6px 8px;
+}
+
+.panel-polling button {
+  padding: 7px 10px;
+  font-size: 0.86rem;
 }
 
 .badge {
@@ -452,6 +468,35 @@ button:hover {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+}
+
+.db-card {
+  border: 1px solid #335684;
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(11, 23, 40, 0.72);
+}
+
+.db-card h3 {
+  margin: 0 0 6px;
+  font-size: 0.93rem;
+}
+
+.db-path {
+  margin: 0 0 4px;
+  opacity: 0.75;
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.db-meta {
+  margin: 0 0 8px;
+  color: #9eb6db;
+  font-size: 0.76rem;
+}
+
+.table-wrap {
+  overflow-x: auto;
 }
 
 table {

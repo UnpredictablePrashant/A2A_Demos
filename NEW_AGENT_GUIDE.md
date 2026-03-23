@@ -194,11 +194,16 @@ Current UI server (`ecosystem/ui_server.py`) now discovers agents automatically 
 - folders matching `agent_*` that contain `app.py`
 
 Autostart behavior is also config-driven:
-- default autostart: `alpha`, `beta`
+- default autostart: none (all agents are `false` unless explicitly enabled)
 - override with `AGENT_<NAME>_AUTOSTART=true|false` (or `<NAME>_AGENT_AUTOSTART`)
 
 For best detection, add each new agent URL in `.env`:
 - `AGENT_GAMMA_URL=http://127.0.0.1:8103`
+
+Polling can be tuned per caller-target route:
+- in UI, after discovery, using `Polling Configuration`
+- default interval is `20` seconds
+- values persist in `ecosystem/ecosystem.db` (`ECOSYSTEM_DB_PATH`)
 
 ## 6) Connect New Agent into Flow
 

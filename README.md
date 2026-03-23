@@ -71,13 +71,20 @@ Core keys:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL` (default: `gpt-4.1-mini`)
-- `ALPHA_POLL_INTERVAL_SECONDS`
 - `ALPHA_MAX_POLL_ATTEMPTS`
 - `BETA_TASK_DELAY_SECONDS`
 - `ALPHA_DB_PATH`
 - `BETA_DB_PATH`
 - `ALPHA_AGENT_URL`
 - `BETA_AGENT_URL`
+- `ALPHA_WORKER_AGENT` (default: `beta`; can be `gamma` or another configured agent id)
+- `GAMMA_TASK_DELAY_SECONDS` (delay before Gamma task is ready for completion)
+- `ECOSYSTEM_DB_PATH` (default: `ecosystem/ecosystem.db`; stores UI-managed polling config)
+
+Polling settings are configured from the UI (`Polling Configuration` table), not `.env`:
+- default poll interval is `20` seconds
+- values are persisted in `ecosystem.db`
+- changes apply for future task runs without restarting agents
 
 ### Multi-agent connection keys
 
@@ -90,6 +97,7 @@ Optional (for local process autostart from UI server):
 
 - `AGENT_<NAME>_PATH=agent_<name>` or absolute path
 - `AGENT_<NAME>_AUTOSTART=true|false`
+- default is `false` for every agent (including `alpha`/`beta`) unless explicitly set
 
 Equivalent alternate style also works:
 
@@ -101,10 +109,13 @@ Example:
 ```env
 ALPHA_AGENT_URL="http://127.0.0.1:8101"
 BETA_AGENT_URL="http://127.0.0.1:8102"
+ALPHA_WORKER_AGENT="beta"
 
 AGENT_GAMMA_URL="http://127.0.0.1:8103"
 AGENT_GAMMA_PATH="agent_gamma"
 AGENT_GAMMA_AUTOSTART=true
+GAMMA_TASK_DELAY_SECONDS=3
+ECOSYSTEM_DB_PATH="ecosystem/ecosystem.db"
 ```
 
 ## 5) Running the System

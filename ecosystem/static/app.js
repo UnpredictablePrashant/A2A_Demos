@@ -7,21 +7,20 @@ const eventStream = document.getElementById('event-stream');
 const dbSnapshot = document.getElementById('db-snapshot');
 const inspector = document.getElementById('inspector');
 const configTable = document.getElementById('config-table');
+const pollingTable = document.getElementById('polling-table');
 const agentsTable = document.getElementById('agents-table');
 const agentsTotal = document.getElementById('agents-total');
 const agentsDetected = document.getElementById('agents-detected');
 const agentsUndetected = document.getElementById('agents-undetected');
 const agentsTs = document.getElementById('agents-ts');
 const statusRunId = document.getElementById('status-run-id');
-const statusAlpha = document.getElementById('status-alpha');
-const statusBetaTask = document.getElementById('status-beta-task');
-const statusBeta = document.getElementById('status-beta');
-const statusAlphaCreated = document.getElementById('status-alpha-created');
-const statusAlphaCompleted = document.getElementById('status-alpha-completed');
-const statusBetaCreated = document.getElementById('status-beta-created');
-const statusBetaCompleted = document.getElementById('status-beta-completed');
-const alphaOutput = document.getElementById('alpha-output');
-const betaOutput = document.getElementById('beta-output');
+const statusRunStatus = document.getElementById('status-run-status');
+const statusEntryAgent = document.getElementById('status-entry-agent');
+const statusDetectedAgents = document.getElementById('status-detected-agents');
+const statusLastUpdated = document.getElementById('status-last-updated');
+const statusAgentsTable = document.getElementById('status-agents-table');
+const runOutput = document.getElementById('run-output');
+const dbOutput = document.getElementById('db-output');
 const graphStage = document.getElementById('graph-stage');
 const edgeList = document.getElementById('edge-list');
 const sessionsTable = document.getElementById('sessions-table');
@@ -31,6 +30,7 @@ let currentRunId = null;
 let ws = null;
 let detectedAgents = [];
 let activityPulseMap = {};
+let pollingConfigRows = [];
 
 function setRunState(state) {
   runState.className = `badge ${state}`;
@@ -147,15 +147,21 @@ function valueForCell(column, value) {
 }
 
 function prioritizeColumns(columns) {
-  const preferred = ['local_id', 'task_id', 'id', 'status', 'beta_status', 'source_agent', 'created_at', 'updated_at', 'completed_at'];
+  const preferred = ['local_id', 'task_id', 'id', 'status', 'source_agent', 'created_at', 'updated_at', 'completed_at'];
+  const verbose = new Set(['input_text', 'request_text', 'planner_brief', 'result_text', 'error_text', 'payload_json']);
   const ordered = [];
   preferred.forEach((col) => {
     if (columns.includes(col) && !ordered.includes(col)) ordered.push(col);
   });
   columns.forEach((col) => {
-    if (!ordered.includes(col)) ordered.push(col);
+    if (!ordered.includes(col) && !verbose.has(col)) ordered.push(col);
   });
-  return ordered.slice(0, 8);
+  if (!ordered.length) {
+    columns.forEach((col) => {
+      if (!ordered.includes(col)) ordered.push(col);
+    });
+  }
+  return ordered.slice(0, 7);
 }
 
 function renderDbSnapshot(data) {
@@ -175,16 +181,22 @@ function renderDbSnapshot(data) {
     const columns = prioritizeColumns(item?.columns || []);
 
     const card = document.createElement('div');
+    card.className = 'db-card';
     const title = document.createElement('h3');
-    title.textContent = `${toTitle(agentId)} DB (\`${item?.table || `${agentId}_tasks`}\`)`;
+    title.textContent = `${toTitle(agentId)} DB (${item?.table || `${agentId}_tasks`})`;
     card.appendChild(title);
 
     const path = document.createElement('p');
     path.textContent = item?.db_path || '';
-    path.style.opacity = '0.75';
-    path.style.margin = '0 0 8px';
-    path.style.fontSize = '12px';
+    path.className = 'db-path';
     card.appendChild(path);
+
+    const meta = document.createElement('p');
+    const rowCount = Number(item?.row_count ?? rows.length);
+    const dbState = item?.db_exists ? 'connected' : 'missing';
+    meta.className = 'db-meta';
+    meta.textContent = `${dbState} | rows: ${rowCount} | columns: ${(item?.columns || []).length}`;
+    card.appendChild(meta);
 
     if (!columns.length) {
       const empty = document.createElement('p');
@@ -194,6 +206,8 @@ function renderDbSnapshot(data) {
       return;
     }
 
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'table-wrap';
     const table = document.createElement('table');
     const thead = document.createElement('thead');
     const headRow = document.createElement('tr');
@@ -218,20 +232,45 @@ function renderDbSnapshot(data) {
       tbody.appendChild(tr);
     });
     table.appendChild(tbody);
-    card.appendChild(table);
+    tableWrap.appendChild(table);
+    card.appendChild(tableWrap);
     dbSnapshot.appendChild(card);
   });
 }
 
-function updateStatusSummary(summary) {
+function renderStatusAgents(rows) {
+  statusAgentsTable.innerHTML = '';
+  rows.forEach((row) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${row.agent_id || '-'}</td>
+      <td>${row.status || 'n/a'}</td>
+      <td title="${row.task_id || ''}">${row.task_id || '-'}</td>
+      <td>${formatTs(row.created_at)}</td>
+      <td>${formatTs(row.completed_at)}</td>
+    `;
+    tr.onclick = () => setInspector('Agent Status Detail', row);
+    statusAgentsTable.appendChild(tr);
+  });
+}
+
+function updateStatusSummary(summary, runStatus = null) {
   if (!summary) return;
-  statusAlpha.textContent = summary.alpha_status || 'n/a';
-  statusBeta.textContent = summary.beta_status || 'n/a';
-  statusBetaTask.textContent = summary.beta_task_id || '-';
-  statusAlphaCreated.textContent = formatTs(summary.alpha_created_at);
-  statusAlphaCompleted.textContent = formatTs(summary.alpha_completed_at);
-  statusBetaCreated.textContent = formatTs(summary.beta_created_at);
-  statusBetaCompleted.textContent = formatTs(summary.beta_completed_at);
+  statusEntryAgent.textContent = summary.entry_agent || 'n/a';
+  statusRunStatus.textContent = runStatus || statusRunStatus.textContent || 'n/a';
+  statusDetectedAgents.textContent = String(detectedAgents.length);
+  statusLastUpdated.textContent = formatTs(Date.now() / 1000);
+  const rows = summary.agents || [];
+  renderStatusAgents(rows);
+
+  const primary = summary.primary || {};
+  if (primary.result_text) {
+    dbOutput.textContent = primary.result_text;
+  } else if (primary.error_text) {
+    dbOutput.textContent = `Error: ${primary.error_text}`;
+  } else {
+    dbOutput.textContent = '(no DB result yet)';
+  }
 }
 
 async function refreshDb() {
@@ -256,6 +295,74 @@ function renderConfig(rows) {
   });
 }
 
+function renderPollingConfig(rows) {
+  pollingConfigRows = rows || [];
+  pollingTable.innerHTML = '';
+  if (!pollingConfigRows.length) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td colspan="6">No caller-target pairs available yet. Discover agents first.</td>';
+    pollingTable.appendChild(tr);
+    return;
+  }
+
+  pollingConfigRows.forEach((row) => {
+    const tr = document.createElement('tr');
+    const intervalValue = Number(row.poll_interval_seconds ?? 20);
+    const attemptsValue = Number(row.max_poll_attempts ?? 5);
+    tr.innerHTML = `
+      <td>${row.caller_agent || '-'}</td>
+      <td>${row.target_agent || '-'}</td>
+      <td><input type="number" step="0.1" min="0.1" value="${intervalValue}" data-field="interval" /></td>
+      <td><input type="number" step="1" min="1" value="${attemptsValue}" data-field="attempts" /></td>
+      <td>${row.is_custom ? 'db(custom)' : 'default(20s)'}</td>
+      <td><button type="button">Save</button></td>
+    `;
+
+    const button = tr.querySelector('button');
+    button.addEventListener('click', async () => {
+      const intervalInput = tr.querySelector('input[data-field="interval"]');
+      const attemptsInput = tr.querySelector('input[data-field="attempts"]');
+      const payload = {
+        caller_agent: row.caller_agent,
+        target_agent: row.target_agent,
+        poll_interval_seconds: Number(intervalInput.value),
+        max_poll_attempts: Number(attemptsInput.value),
+      };
+
+      button.disabled = true;
+      button.textContent = 'Saving...';
+      try {
+        const res = await fetch('/api/polling-config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          setInspector('Polling Config Save Failed', err);
+          button.textContent = 'Save';
+          button.disabled = false;
+          return;
+        }
+        const updated = await res.json();
+        renderPollingConfig(updated.rows || []);
+        setInspector('Polling Config Saved', payload);
+      } catch (err) {
+        setInspector('Polling Config Save Error', String(err));
+      } finally {
+        button.textContent = 'Save';
+        button.disabled = false;
+      }
+    });
+
+    tr.onclick = (ev) => {
+      if (ev.target.tagName.toLowerCase() === 'input' || ev.target.tagName.toLowerCase() === 'button') return;
+      setInspector('Polling Config Detail', row);
+    };
+    pollingTable.appendChild(tr);
+  });
+}
+
 function renderAgents(data) {
   const rows = data.agents || [];
   detectedAgents = rows.filter((x) => x.detected).map((x) => String(x.id).toLowerCase());
@@ -264,6 +371,7 @@ function renderAgents(data) {
   agentsDetected.textContent = String(data.detected ?? 0);
   agentsUndetected.textContent = String(data.undetected ?? 0);
   agentsTs.textContent = data.timestamp ? formatTime(data.timestamp) : '-';
+  statusDetectedAgents.textContent = String(detectedAgents.length);
 
   agentsTable.innerHTML = '';
   rows.forEach((row) => {
@@ -428,18 +536,12 @@ async function refreshCurrentSession() {
 
     const data = await res.json();
     renderGraph(data.graph || { nodes: [], edges: [], events: [] });
+    updateStatusSummary(data.db_summary || {}, data.run?.status || null);
+    statusEntryAgent.textContent = data.run?.entry_agent || statusEntryAgent.textContent || 'n/a';
 
     if (data.run?.result) {
-      alphaOutput.textContent = data.run.result;
+      runOutput.textContent = data.run.result;
       resultBox.textContent = data.run.result;
-    }
-
-    if (data.run?.beta_result) {
-      betaOutput.textContent = data.run.beta_result;
-    } else if (data.run?.status === 'running') {
-      betaOutput.textContent = '(waiting for beta result)';
-    } else if (!data.run?.result) {
-      betaOutput.textContent = '(no beta result)';
     }
   } catch (_) {
     // ignore
@@ -452,6 +554,17 @@ async function refreshConfig() {
     if (!res.ok) return;
     const data = await res.json();
     renderConfig(data.config || []);
+  } catch (_) {
+    // ignore
+  }
+}
+
+async function refreshPollingConfig() {
+  try {
+    const res = await fetch('/api/polling-config');
+    if (!res.ok) return;
+    const data = await res.json();
+    renderPollingConfig(data.rows || []);
   } catch (_) {
     // ignore
   }
@@ -479,7 +592,8 @@ async function pollRun() {
     if (!res.ok) return;
 
     const run = await res.json();
-    updateStatusSummary(run.db_summary || {});
+    updateStatusSummary(run.db_summary || {}, run.status || null);
+    statusEntryAgent.textContent = run.entry_agent || statusEntryAgent.textContent || 'n/a';
     await refreshCurrentSession();
 
     if (run.status === 'running') {
@@ -491,7 +605,7 @@ async function pollRun() {
     if (run.status === 'completed') {
       setRunState('done');
       resultBox.textContent = run.result || '(empty result)';
-      alphaOutput.textContent = run.result || '(empty result)';
+      runOutput.textContent = run.result || '(empty result)';
       submitBtn.disabled = false;
       refreshSessions();
       return;
@@ -499,7 +613,7 @@ async function pollRun() {
 
     setRunState('failed');
     resultBox.textContent = run.result || 'Task failed';
-    alphaOutput.textContent = run.result || 'Task failed';
+    runOutput.textContent = run.result || 'Task failed';
     submitBtn.disabled = false;
     refreshSessions();
   } catch (_) {
@@ -535,8 +649,9 @@ form.addEventListener('submit', async (e) => {
   submitBtn.disabled = true;
   setRunState('running');
   resultBox.textContent = '';
-  alphaOutput.textContent = '';
-  betaOutput.textContent = '';
+  runOutput.textContent = '';
+  dbOutput.textContent = '';
+  statusRunStatus.textContent = 'running';
 
   const res = await fetch('/api/tasks', {
     method: 'POST',
@@ -562,9 +677,11 @@ setRunState('idle');
 connectEvents();
 refreshDb();
 refreshConfig();
+refreshPollingConfig();
 refreshAgents();
 refreshSessions();
 setInterval(refreshDb, 1200);
 setInterval(refreshConfig, 8000);
+setInterval(refreshPollingConfig, 5000);
 setInterval(refreshAgents, 3000);
 setInterval(refreshSessions, 3000);
