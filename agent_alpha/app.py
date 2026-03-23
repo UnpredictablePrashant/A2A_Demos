@@ -12,16 +12,16 @@ from agent_executor import AlphaAgentExecutor
 
 def build_agent_card() -> AgentCard:
     skill = AgentSkill(
-        id="alpha_broker",
-        name="Alpha Broker",
-        description="Receives user input and delegates to Beta over A2A.",
-        tags=["broker", "delegation", "a2a"],
-        examples=["ask beta what you heard", "delegate this to beta"],
+        id="alpha_planner",
+        name="Alpha Planner",
+        description="Plans topic/content briefs and delegates story writing to Beta over A2A.",
+        tags=["planner", "delegation", "a2a"],
+        examples=["plan a story about climate resilience", "create a brief for a startup journey story"],
     )
 
     return AgentCard(
         name="Alpha Agent",
-        description="Front agent that talks to Beta using A2A protocol.",
+        description="Planner agent that builds a writing brief and delegates story generation to Beta.",
         url="http://127.0.0.1:8101/",
         version="1.0.0",
         default_input_modes=["text"],

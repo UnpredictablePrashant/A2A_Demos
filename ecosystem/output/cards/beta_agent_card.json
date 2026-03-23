@@ -8,22 +8,22 @@
   "defaultOutputModes": [
     "text"
   ],
-  "description": "Receives A2A calls from Alpha and responds.",
+  "description": "Content generator that writes story-mode outputs from Alpha planner briefs.",
   "name": "Beta Agent",
   "preferredTransport": "JSONRPC",
   "protocolVersion": "0.3.0",
   "skills": [
     {
-      "description": "Replies with a deterministic echo confirmation.",
+      "description": "Generates story-mode content from Alpha's planner brief.",
       "examples": [
-        "hello beta",
-        "alpha asked me to ping you"
+        "turn this brief into a story",
+        "write a narrative from planner inputs"
       ],
-      "id": "beta_echo",
-      "name": "Beta Echo",
+      "id": "beta_story_generator",
+      "name": "Beta Story Generator",
       "tags": [
-        "echo",
-        "demo",
+        "story",
+        "generator",
         "a2a"
       ]
     }

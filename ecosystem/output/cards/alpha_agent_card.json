@@ -8,21 +8,21 @@
   "defaultOutputModes": [
     "text"
   ],
-  "description": "Front agent that talks to Beta using A2A protocol.",
+  "description": "Planner agent that builds a writing brief and delegates story generation to Beta.",
   "name": "Alpha Agent",
   "preferredTransport": "JSONRPC",
   "protocolVersion": "0.3.0",
   "skills": [
     {
-      "description": "Receives user input and delegates to Beta over A2A.",
+      "description": "Plans topic/content briefs and delegates story writing to Beta over A2A.",
       "examples": [
-        "ask beta what you heard",
-        "delegate this to beta"
+        "plan a story about climate resilience",
+        "create a brief for a startup journey story"
       ],
-      "id": "alpha_broker",
-      "name": "Alpha Broker",
+      "id": "alpha_planner",
+      "name": "Alpha Planner",
       "tags": [
-        "broker",
+        "planner",
         "delegation",
         "a2a"
       ]

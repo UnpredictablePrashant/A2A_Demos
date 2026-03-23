@@ -12,16 +12,16 @@ from agent_executor import BetaAgentExecutor
 
 def build_agent_card() -> AgentCard:
     skill = AgentSkill(
-        id="beta_echo",
-        name="Beta Echo",
-        description="Replies with a deterministic echo confirmation.",
-        tags=["echo", "demo", "a2a"],
-        examples=["hello beta", "alpha asked me to ping you"],
+        id="beta_story_generator",
+        name="Beta Story Generator",
+        description="Generates story-mode content from Alpha's planner brief.",
+        tags=["story", "generator", "a2a"],
+        examples=["turn this brief into a story", "write a narrative from planner inputs"],
     )
 
     return AgentCard(
         name="Beta Agent",
-        description="Receives A2A calls from Alpha and responds.",
+        description="Content generator that writes story-mode outputs from Alpha planner briefs.",
         url="http://127.0.0.1:8102/",
         version="1.0.0",
         default_input_modes=["text"],
