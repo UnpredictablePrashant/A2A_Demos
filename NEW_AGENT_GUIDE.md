@@ -201,7 +201,7 @@ For best detection, add each new agent URL in `.env`:
 - `AGENT_GAMMA_URL=http://127.0.0.1:8103`
 
 Polling can be tuned per caller-target route:
-- in UI, after discovery, using `Polling Configuration`
+- in UI, after discovery, using `/polling` page
 - default interval is `20` seconds
 - values persist in `ecosystem/ecosystem.db` (`ECOSYSTEM_DB_PATH`)
 

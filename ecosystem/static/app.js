@@ -296,6 +296,7 @@ function renderConfig(rows) {
 }
 
 function renderPollingConfig(rows) {
+  if (!pollingTable) return;
   pollingConfigRows = rows || [];
   pollingTable.innerHTML = '';
   if (!pollingConfigRows.length) {
@@ -560,6 +561,7 @@ async function refreshConfig() {
 }
 
 async function refreshPollingConfig() {
+  if (!pollingTable) return;
   try {
     const res = await fetch('/api/polling-config');
     if (!res.ok) return;
@@ -677,11 +679,9 @@ setRunState('idle');
 connectEvents();
 refreshDb();
 refreshConfig();
-refreshPollingConfig();
 refreshAgents();
 refreshSessions();
 setInterval(refreshDb, 1200);
 setInterval(refreshConfig, 8000);
-setInterval(refreshPollingConfig, 5000);
 setInterval(refreshAgents, 3000);
 setInterval(refreshSessions, 3000);

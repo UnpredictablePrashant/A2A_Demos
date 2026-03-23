@@ -142,6 +142,14 @@ button:hover {
   padding: 6px 8px;
 }
 
+.panel-polling select {
+  border-radius: 8px;
+  border: 1px solid #33507e;
+  background: #0d1b31;
+  color: var(--text);
+  padding: 6px 8px;
+}
+
 .panel-polling button {
   padding: 7px 10px;
   font-size: 0.86rem;

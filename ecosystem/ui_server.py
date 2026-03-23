@@ -242,29 +242,44 @@ class Orchestrator:
         by_pair = {
             (str(row.get("caller_agent", "")).lower(), str(row.get("target_agent", "")).lower()): row for row in rows
         }
-        effective_rows: list[dict[str, Any]] = []
-        caller = self.entry_agent_id or "alpha"
-        known_targets = sorted(
+        known_agents = sorted(
             {
                 str(item.get("id", "")).lower()
                 for item in self.agent_catalog
-                if str(item.get("id", "")).lower() and str(item.get("id", "")).lower() != caller
+                if str(item.get("id", "")).strip()
             }
         )
-        for target in known_targets:
-            existing = by_pair.get((caller, target))
-            effective_rows.append(
+        if not known_agents:
+            known_agents = sorted(
                 {
-                    "caller_agent": caller,
-                    "target_agent": target,
-                    "poll_interval_seconds": (
-                        float(existing.get("poll_interval_seconds", default_interval)) if existing else default_interval
-                    ),
-                    "max_poll_attempts": int(existing.get("max_poll_attempts", default_attempts)) if existing else default_attempts,
-                    "updated_at": existing.get("updated_at") if existing else None,
-                    "is_custom": bool(existing),
+                    str(row.get("caller_agent", "")).lower()
+                    for row in rows
+                    if str(row.get("caller_agent", "")).strip()
+                }
+                | {
+                    str(row.get("target_agent", "")).lower()
+                    for row in rows
+                    if str(row.get("target_agent", "")).strip()
                 }
             )
+        effective_rows: list[dict[str, Any]] = []
+        for caller in known_agents:
+            for target in known_agents:
+                if caller == target:
+                    continue
+                existing = by_pair.get((caller, target))
+                effective_rows.append(
+                    {
+                        "caller_agent": caller,
+                        "target_agent": target,
+                        "poll_interval_seconds": (
+                            float(existing.get("poll_interval_seconds", default_interval)) if existing else default_interval
+                        ),
+                        "max_poll_attempts": int(existing.get("max_poll_attempts", default_attempts)) if existing else default_attempts,
+                        "updated_at": existing.get("updated_at") if existing else None,
+                        "is_custom": bool(existing),
+                    }
+                )
 
         for row in rows:
             pair = (str(row.get("caller_agent", "")).lower(), str(row.get("target_agent", "")).lower())
@@ -283,6 +298,7 @@ class Orchestrator:
         )
         return {
             "entry_agent_id": self.entry_agent_id,
+            "agents": known_agents,
             "default_poll_interval_seconds": default_interval,
             "default_max_poll_attempts": default_attempts,
             "db_path": str(self.ecosystem_db_path),
@@ -919,6 +935,10 @@ async def session_page(_: Request) -> FileResponse:
     return FileResponse(STATIC_DIR / "session.html")
 
 
+async def polling_page(_: Request) -> FileResponse:
+    return FileResponse(STATIC_DIR / "polling.html")
+
+
 async def submit_task(request: Request) -> JSONResponse:
     payload = await request.json()
     text = str(payload.get("text", "")).strip()
@@ -1041,6 +1061,7 @@ async def events_ws(ws: WebSocket) -> None:
 routes = [
     Route("/", homepage),
     Route("/sessions/{run_id}", session_page),
+    Route("/polling", polling_page),
     Route("/api/tasks", submit_task, methods=["POST"]),
     Route("/api/tasks/{run_id}", task_status, methods=["GET"]),
     Route("/api/db", db_state, methods=["GET"]),

@@ -81,7 +81,7 @@ Core keys:
 - `GAMMA_TASK_DELAY_SECONDS` (delay before Gamma task is ready for completion)
 - `ECOSYSTEM_DB_PATH` (default: `ecosystem/ecosystem.db`; stores UI-managed polling config)
 
-Polling settings are configured from the UI (`Polling Configuration` table), not `.env`:
+Polling settings are configured from the UI polling page (`/polling`), not `.env`:
 - default poll interval is `20` seconds
 - values are persisted in `ecosystem.db`
 - changes apply for future task runs without restarting agents
