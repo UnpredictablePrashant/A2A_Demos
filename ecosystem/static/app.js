@@ -55,16 +55,16 @@ function formatTs(ts) {
   return new Date(ts * 1000).toLocaleString();
 }
 
-function setInspector(title, data) {
-  const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
-  inspector.textContent = `${title}\n\n${payload}`;
-}
-
 function toTitle(value) {
   if (!value) return '';
   return value
     .replace(/[_-]/g, ' ')
     .replace(/\b\w/g, (m) => m.toUpperCase());
+}
+
+function setInspector(title, data) {
+  const payload = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+  inspector.textContent = `${title}\n\n${payload}`;
 }
 
 function renderAgentActivityCards(rows) {
@@ -169,11 +169,6 @@ function updateStatusSummary(summary) {
   statusAlphaCompleted.textContent = formatTs(summary.alpha_completed_at);
   statusBetaCreated.textContent = formatTs(summary.beta_created_at);
   statusBetaCompleted.textContent = formatTs(summary.beta_completed_at);
-  if (summary.beta_result) {
-    betaOutput.textContent = summary.beta_result;
-  } else if (summary.beta_error) {
-    betaOutput.textContent = summary.beta_error;
-  }
 }
 
 async function refreshDb() {
@@ -181,7 +176,6 @@ async function refreshDb() {
     const res = await fetch('/api/db');
     if (!res.ok) return;
     const data = await res.json();
-
     renderAlphaTable(data.alpha || []);
     renderBetaTable(data.beta || []);
     updateStatusSummary(data.summary || {});
@@ -203,6 +197,7 @@ function renderConfig(rows) {
 function renderAgents(data) {
   const rows = data.agents || [];
   detectedAgents = rows.filter((x) => x.detected).map((x) => String(x.id).toLowerCase());
+
   agentsTotal.textContent = String(data.total_added ?? rows.length);
   agentsDetected.textContent = String(data.detected ?? 0);
   agentsUndetected.textContent = String(data.undetected ?? 0);
@@ -236,6 +231,7 @@ function layoutNodes(nodes, width, height) {
   const radius = Math.max(90, Math.min(width, height) * 0.34);
   const out = {};
   const sorted = [...nodes].sort((a, b) => a.id.localeCompare(b.id));
+
   sorted.forEach((node, idx) => {
     const angle = (Math.PI * 2 * idx) / Math.max(sorted.length, 1) - Math.PI / 2;
     out[node.id] = {
@@ -249,7 +245,13 @@ function layoutNodes(nodes, width, height) {
 function renderGraph(graph) {
   if (!graphStage) return;
 
-  const nodes = (graph.nodes || []).filter((n) => n.id === 'user' || n.id === 'db' || detectedAgents.includes(n.id));
+  const nodes = (graph.nodes || []).filter((n) => {
+    if (n.id === 'user') return true;
+    if (detectedAgents.includes(n.id)) return true;
+    if (n.id.endsWith('_db') && detectedAgents.includes(n.id.replace(/_db$/, ''))) return true;
+    return false;
+  });
+
   const nodeIds = new Set(nodes.map((n) => n.id));
   const edges = (graph.edges || []).filter((e) => nodeIds.has(e.from) && nodeIds.has(e.to));
 
@@ -304,7 +306,11 @@ function renderGraph(graph) {
     const t = document.createElementNS('http://www.w3.org/2000/svg', 'text');
     t.setAttribute('x', p.x);
     t.setAttribute('y', p.y);
-    t.textContent = node.id === 'db' ? 'DB' : toTitle(node.id);
+    t.textContent = node.id.endsWith('_db')
+      ? `${toTitle(node.id.replace(/_db$/, ''))} DB`
+      : node.id === 'user'
+        ? 'User'
+        : toTitle(node.id);
 
     g.appendChild(c);
     g.appendChild(t);
@@ -357,11 +363,21 @@ async function refreshCurrentSession() {
   try {
     const res = await fetch(`/api/sessions/${currentRunId}`);
     if (!res.ok) return;
+
     const data = await res.json();
     renderGraph(data.graph || { nodes: [], edges: [], events: [] });
+
     if (data.run?.result) {
       alphaOutput.textContent = data.run.result;
       resultBox.textContent = data.run.result;
+    }
+
+    if (data.run?.beta_result) {
+      betaOutput.textContent = data.run.beta_result;
+    } else if (data.run?.status === 'running') {
+      betaOutput.textContent = '(waiting for beta result)';
+    } else if (!data.run?.result) {
+      betaOutput.textContent = '(no beta result)';
     }
   } catch (_) {
     // ignore

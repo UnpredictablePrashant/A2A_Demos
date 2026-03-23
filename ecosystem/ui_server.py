@@ -296,9 +296,10 @@ class Orchestrator:
                 }
             )
         if "BETA_SENDING_RESPONSE_TEXT" in message:
-            links.append({"from": "beta", "to": "db", "type": "db_write"})
-            links.append({"from": "db", "to": "alpha", "type": "db_status"})
+            links.append({"from": "beta", "to": "beta_db", "type": "db_write"})
+            links.append({"from": "beta_db", "to": "alpha", "type": "db_status"})
         if "ALPHA_FINAL_RESPONSE_TEXT" in message:
+            links.append({"from": "alpha", "to": "alpha_db", "type": "db_write"})
             links.append({"from": "alpha", "to": "user", "type": "final"})
         if message.startswith("New task submitted:"):
             links.append({"from": "user", "to": "alpha", "type": "submit"})
@@ -479,7 +480,9 @@ class Orchestrator:
                 if proc and proc.process:
                     process_status = "running" if proc.process.poll() is None else "stopped"
                 elif item.get("managed"):
-                    process_status = "stopped"
+                    # Managed-capable agent not launched by this UI process.
+                    # If endpoint is live, treat it as running (externally started).
+                    process_status = "running" if detected else "stopped"
 
                 if detected:
                     detected_count += 1
@@ -594,7 +597,8 @@ class Orchestrator:
 
         events = list(run.get("events", []))
         detected = {x.lower() for x in detected_agents}
-        nodes: set[str] = {"user", "db"} | detected
+        agent_db_nodes = {f"{agent}_db" for agent in detected}
+        nodes: set[str] = {"user"} | detected | agent_db_nodes
         edge_counts: dict[tuple[str, str, str], int] = {}
 
         for event in events:
@@ -604,9 +608,9 @@ class Orchestrator:
                 link_type = str(link.get("type", "link")).lower()
                 if not from_id or not to_id:
                     continue
-                if from_id not in {"user", "db"} and from_id not in detected:
+                if from_id not in {"user"} and from_id not in detected and from_id not in agent_db_nodes:
                     continue
-                if to_id not in {"user", "db"} and to_id not in detected:
+                if to_id not in {"user"} and to_id not in detected and to_id not in agent_db_nodes:
                     continue
                 nodes.add(from_id)
                 nodes.add(to_id)
@@ -614,7 +618,10 @@ class Orchestrator:
                 edge_counts[key] = edge_counts.get(key, 0) + 1
 
         node_rows = [
-            {"id": node, "kind": "agent" if node not in {"user", "db"} else node}
+            {
+                "id": node,
+                "kind": "user" if node == "user" else "db" if node.endswith("_db") else "agent",
+            }
             for node in sorted(nodes)
         ]
         edge_rows = [
@@ -622,6 +629,12 @@ class Orchestrator:
             for (f, t, typ), count in sorted(edge_counts.items(), key=lambda x: (-x[1], x[0]))
         ]
         return {"nodes": node_rows, "edges": edge_rows, "events": events[-120:]}
+
+    def _extract_story_result(self, alpha_text: str) -> str:
+        marker = "- Story result:"
+        if marker not in alpha_text:
+            return ""
+        return alpha_text.split(marker, 1)[1].strip()
 
     def db_snapshot(self) -> dict[str, Any]:
         def fetch_rows(
@@ -771,6 +784,7 @@ async def session_state(request: Request) -> JSONResponse:
                 "input": run.get("input"),
                 "status": run.get("status"),
                 "result": run.get("result"),
+                "beta_result": ORCH._extract_story_result(str(run.get("result", ""))),
                 "created_at": run.get("created_at"),
                 "updated_at": run.get("updated_at"),
             },
