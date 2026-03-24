@@ -301,105 +301,91 @@ Example user query: `"write a short story about climate resilience"`
 
 ---
 
-## 10) How to Add an MCP Layer in This Project
+## 10) Gamma MCP Layer (FastMCP) - Code Explanation
 
-This section adds a **tool layer** so agents can call external capabilities through MCP before (or during) LLM response generation.
+This project now has MCP implemented only in Gamma.
 
-Think of it as:
+- **A2A**: Alpha <-> Gamma task exchange
+- **MCP**: Gamma <-> tool server exchange
 
-- **A2A** = agent-to-agent communication
-- **MCP** = agent-to-tools/data communication
+Current Gamma MCP files:
 
-Best place to add MCP first: **worker agent (Beta or Gamma)**.
+- `agent_gamma/mcp_layer.py` (FastMCP client wrapper)
+- `agent_gamma/mcp_server.py` (minimal FastMCP server with reverse tool)
 
-### 10.1 Suggested Architecture
+### 10.1 `agent_gamma/mcp_server.py` (minimal tool server)
 
-Add a new layer:
+Block-by-block:
 
-1. User -> Alpha (A2A)
-2. Alpha -> Worker (A2A)
-3. Worker -> MCP tools (MCP)
-4. Worker combines MCP data + LLM output
-5. Worker returns result to Alpha
+1. `mcp = FastMCP(name=\"Gamma Minimal MCP\")`
+   - Creates a FastMCP server instance.
+2. `@mcp.tool` over `reverse_string(text: str) -> str`
+   - Exposes one MCP tool named `reverse_string`.
+   - Returns `text[::-1]` (reverse string).
+3. `mcp.run()` in `__main__`
+   - Starts MCP server on stdio transport.
+   - This is what Gamma client launches as a subprocess.
 
-This keeps Alpha lightweight and makes workers tool-enabled.
+### 10.2 `agent_gamma/mcp_layer.py` (Gamma-only client wrapper)
 
-### 10.2 Files to Add
+Main parts:
 
-Create a shared MCP adapter file:
+1. Safe imports of FastMCP client classes:
+   - `Client`
+   - `StdioTransport`
+   - If package missing, code degrades gracefully with error message.
+2. `GammaMCPConfig` dataclass:
+   - Stores runtime MCP config (enabled, command, args, tool name, args JSON, cwd).
+3. `GammaMCPClient.from_env()`:
+   - Reads Gamma-specific env keys:
+     - `GAMMA_MCP_ENABLED`
+     - `GAMMA_MCP_SERVER_COMMAND`
+     - `GAMMA_MCP_SERVER_ARGS`
+     - `GAMMA_MCP_TOOL_NAME`
+     - `GAMMA_MCP_TOOL_ARGS_JSON`
+     - `GAMMA_MCP_PASS_USER_QUERY`
+     - `GAMMA_MCP_CWD`
+   - Defaults are beginner-friendly:
+     - command: current Python interpreter
+     - args: local `agent_gamma/mcp_server.py`
+     - tool: `reverse_string`
+4. `fetch_context(user_query)`:
+   - Builds `StdioTransport(command, args, cwd)`.
+   - Opens FastMCP `Client` session.
+   - If tool name missing, returns available tool list.
+   - Else calls tool with args.
+   - If `GAMMA_MCP_PASS_USER_QUERY=true`, injects user text as `text` argument.
+   - Returns tool output as context string for Gamma executor.
 
-- `agent_core/mcp_layer.py`
+### 10.3 Where Gamma Executor Uses MCP
 
-Purpose:
+In `agent_gamma/agent_executor.py`:
 
-- Manage MCP server connection/session.
-- Provide simple methods like `get_tool_data(query)`.
+1. `self.mcp = GammaMCPClient.from_env()` in `__init__`.
+2. `_generate_text(user_query)` calls `await self.mcp.fetch_context(user_query)`.
+3. If OpenAI is disabled but MCP returns data, Gamma still completes task with MCP output.
+4. If OpenAI is enabled, MCP context is injected into model prompt.
 
-### 10.3 Minimal Integration Plan
+This keeps Gamma resilient:
+- MCP off -> normal Gamma behavior
+- MCP on + no OpenAI -> tool-only response still works
+- MCP on + OpenAI -> tool-augmented response
 
-1. Install MCP SDK dependency (add to `requirements.txt`).
-2. Add MCP config env vars in `.env`, for example:
-   - `MCP_ENABLED=true`
-   - `MCP_TRANSPORT=stdio`
-   - `MCP_SERVER_COMMAND=npx`
-   - `MCP_SERVER_ARGS=-y,@modelcontextprotocol/server-filesystem,/tmp`
-3. Build a thin client wrapper in `agent_core/mcp_layer.py`.
-4. In `agent_beta/agent_executor.py` (or Gamma), initialize MCP client in `__init__`.
-5. During generation, call MCP first and inject returned context into prompt.
-6. Add observability fields in DB payloads if needed (`tool_calls`, `tool_errors`).
+### 10.4 Reverse String Example
 
-### 10.4 Beta Hook Points
+Minimal `.env`:
 
-In `BetaAgentExecutor`:
-
-- `__init__`: create `self.mcp = ...` when enabled.
-- `_generate_story(...)`: call MCP to fetch context before LLM call.
-- `_generate_llm_response(...)`: include MCP context in user/system input.
-
-Pseudo flow:
-
-```text
-user_query + planner_brief
-  -> MCP lookup (optional)
-  -> build enriched prompt
-  -> OpenAI generation
-  -> return final story
+```env
+GAMMA_MCP_ENABLED=true
+GAMMA_MCP_SERVER_COMMAND=python3
+GAMMA_MCP_SERVER_ARGS='agent_gamma/mcp_server.py'
+GAMMA_MCP_TOOL_NAME=reverse_string
+GAMMA_MCP_PASS_USER_QUERY=true
 ```
 
-### 10.5 Prompt Pattern With MCP Context
+If `user_query` is `hello gamma`, MCP tool output is:
 
-Use this style:
-
-- Section 1: Original planner payload
-- Section 2: MCP tool results (facts/data)
-- Section 3: generation instructions
-
-This avoids mixing source data with instruction text.
-
-### 10.6 Failure Strategy (Important)
-
-Do not fail the whole task if MCP fails.
-
-Recommended behavior:
-
-- If MCP fails: log error + continue with normal LLM/fallback path.
-- Return successful worker response unless core generation also fails.
-
-This matches the resilient style already used in Alpha/Beta/Gamma.
-
-### 10.7 Optional: MCP at Alpha Layer
-
-You can also add MCP to Alpha for planning-time retrieval (domain docs, policy checks, templates). Start with worker first, then add Alpha if needed.
-
-### 10.8 Optional: Expose MCP Capability in Agent Card
-
-In `app.py`, add a skill/tag indicating tool-enabled behavior, for example tags:
-
-- `mcp`
-- `tool-use`
-- `retrieval`
-
-This helps other agents understand that your worker can perform tool-augmented responses.
+`ammag olleh`
 
 ---
 

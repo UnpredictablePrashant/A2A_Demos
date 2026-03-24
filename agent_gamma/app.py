@@ -66,6 +66,19 @@ def build_skills() -> list[AgentSkill]:
                 "document response fields for gamma task status",
             ],
         ),
+        AgentSkill(
+            id="gamma_mcp_tools",
+            name="Gamma MCP Tool Access",
+            description=(
+                "Optionally connects to an MCP server from Gamma executor to fetch tool context "
+                "before generating or returning responses."
+            ),
+            tags=["gamma", "mcp", "tools", "retrieval"],
+            examples=[
+                "run gamma with MCP context",
+                "list available MCP tools through gamma",
+            ],
+        ),
     ]
 
 

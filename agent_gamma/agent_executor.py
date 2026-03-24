@@ -17,6 +17,7 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from agent_core.json_utils import parse_json_or_none, to_pretty_json
+from mcp_layer import GammaMCPClient
 
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,7 @@ class GammaAgentExecutor(AgentExecutor):
         self.model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
         api_key = os.environ.get("OPENAI_API_KEY", "")
         self.client = AsyncOpenAI(api_key=api_key) if api_key else None
+        self.mcp = GammaMCPClient.from_env()
         self.task_delay_seconds = float(os.environ.get("GAMMA_TASK_DELAY_SECONDS", "3"))
         self.db_path = os.environ.get("GAMMA_DB_PATH", os.path.join(os.path.dirname(__file__), "gamma_tasks.db"))
         self._init_db()
@@ -138,17 +140,42 @@ class GammaAgentExecutor(AgentExecutor):
             )
             conn.commit()
 
-    async def _generate_text(self, user_query: str) -> str:
+    async def _generate_text(self, user_query: str) -> tuple[str, bool]:
+        mcp_context = await self.mcp.fetch_context(user_query)
+
         if not self.client:
-            return "Set OPENAI_API_KEY to enable model responses."
+            if mcp_context:
+                return (
+                    "Gamma MCP response (OpenAI disabled):\n"
+                    f"{mcp_context}",
+                    True,
+                )
+            return (
+                "Set OPENAI_API_KEY to enable model responses, or enable MCP and set GAMMA_MCP_SERVER_COMMAND.",
+                False,
+            )
+
+        user_input = user_query
+        if mcp_context:
+            user_input = (
+                f"User query:\n{user_query}\n\n"
+                f"MCP context:\n{mcp_context}\n\n"
+                "Use MCP context when relevant and clearly answer the user query."
+            )
         res = await self.client.responses.create(
             model=self.model,
             input=[
-                {"role": "system", "content": "You are Gamma Agent."},
-                {"role": "user", "content": user_query},
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Gamma Agent. If MCP context is provided, treat it as supporting data "
+                        "and produce a concise, accurate response."
+                    ),
+                },
+                {"role": "user", "content": user_input},
             ],
         )
-        return res.output_text or "(empty model response)"
+        return (res.output_text or "(empty model response)", True)
 
     async def _refresh_and_get_task(self, task_id: str) -> dict[str, object] | None:
         task = self._get_task(task_id)
@@ -167,11 +194,11 @@ class GammaAgentExecutor(AgentExecutor):
 
         user_query = str(task.get("user_query", ""))
         try:
-            result = await self._generate_text(user_query)
-            if not self.client:
-                self._update_task_status(task_id, "failed", error_text=result)
-            else:
+            result, ok = await self._generate_text(user_query)
+            if ok:
                 self._update_task_status(task_id, "completed", result_text=result)
+            else:
+                self._update_task_status(task_id, "failed", error_text=result)
         except Exception as exc:
             logger.exception("GAMMA_TASK_COMPLETION_FAILED task_id=%s", task_id)
             self._update_task_status(task_id, "failed", error_text=str(exc))

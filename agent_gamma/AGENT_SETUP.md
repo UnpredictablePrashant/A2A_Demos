@@ -20,6 +20,12 @@ python3 app.py
 - `GAMMA_AGENT_URL` (alternate URL key format; either key works)
 - `GAMMA_DB_PATH` (SQLite path for this agent's task DB)
 - `GAMMA_TASK_DELAY_SECONDS` (default task delay before completion is attempted)
+- `GAMMA_MCP_ENABLED` (`true/false`, enables MCP fetch in Gamma)
+- `GAMMA_MCP_SERVER_COMMAND` (MCP stdio command, example: `npx`)
+- `GAMMA_MCP_SERVER_ARGS` (command args, shell-style string)
+- `GAMMA_MCP_TOOL_NAME` (optional tool to call; if empty, Gamma returns exposed tool list)
+- `GAMMA_MCP_TOOL_ARGS_JSON` (optional JSON object passed to tool call)
+- `GAMMA_MCP_PASS_USER_QUERY` (`true/false`, injects `query` arg automatically)
 
 ## Env Resolution Order
 
@@ -91,6 +97,31 @@ When you run `python3 app.py`, the sequence is:
    - returns `task_status_result` with `result` or `error` fields on terminal states
 
 This means DB file/table are auto-created the first time the executor starts.
+
+## Simple MCP Example
+
+Add this in your `.env` (project root or `agent_gamma/.env`):
+
+```env
+GAMMA_MCP_ENABLED=true
+GAMMA_MCP_SERVER_COMMAND=python3
+GAMMA_MCP_SERVER_ARGS='agent_gamma/mcp_server.py'
+GAMMA_MCP_TOOL_NAME=reverse_string
+GAMMA_MCP_PASS_USER_QUERY=true
+```
+
+Behavior:
+- if MCP is enabled and OpenAI key is missing, Gamma still returns MCP output
+- if both MCP and OpenAI are enabled, Gamma injects MCP context into model prompt
+
+Implementation note:
+- Gamma MCP logic lives in `agent_gamma/mcp_layer.py` (FastMCP client + stdio transport)
+- Minimal FastMCP server lives in `agent_gamma/mcp_server.py` with one tool: `reverse_string(text)`
+- `agent_core/` remains A2A-focused only
+
+Quick reverse-string test:
+- submit a Gamma task with `user_query`: `hello gamma`
+- MCP tool output becomes: `ammag olleh`
 
 ## Current Table
 
