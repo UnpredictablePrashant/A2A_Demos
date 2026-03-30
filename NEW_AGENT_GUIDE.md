@@ -22,6 +22,18 @@ OpenAI-enabled template:
 python3 ecosystem/create_agent.py gamma --port 8103 --with-openai
 ```
 
+MCP-enabled template (adds MCP client/server scaffold):
+
+```bash
+python3 ecosystem/create_agent.py gamma --port 8103 --mcp
+```
+
+OpenAI + MCP:
+
+```bash
+python3 ecosystem/create_agent.py gamma --port 8103 --with-openai --mcp
+```
+
 No-DB template (optional):
 
 ```bash
@@ -186,6 +198,26 @@ Recommended minimum skills:
 1. Task execution skill (core behavior).
 2. Task tracking/observability skill (status + DB lifecycle).
 3. Integration contract skill (actions, required fields, response schema).
+
+## 4.2 MCP Scaffold (Optional)
+
+If you used `--mcp`, the scaffold includes:
+- `mcp_server.py` (FastMCP server with example tools)
+- `mcp_layer.py` (client wrapper used by the executor)
+
+Quick enable (edit `.env` or export):
+
+```bash
+GAMMA_MCP_ENABLED=true
+GAMMA_MCP_TOOL_NAME=reverse_string
+```
+
+Override the server command/args to point at any MCP server (Python, Node, etc):
+
+```bash
+GAMMA_MCP_SERVER_COMMAND=npx
+GAMMA_MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
+```
 
 ## 5) Runtime Management + Discovery
 

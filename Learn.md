@@ -303,7 +303,7 @@ Example user query: `"write a short story about climate resilience"`
 
 ## 10) Gamma MCP Layer (FastMCP) - Code Explanation
 
-This project now has MCP implemented only in Gamma.
+MCP is implemented in Gamma and can be scaffolded for new agents via `--mcp` in `ecosystem/create_agent.py`.
 
 - **A2A**: Alpha <-> Gamma task exchange
 - **MCP**: Gamma <-> tool server exchange

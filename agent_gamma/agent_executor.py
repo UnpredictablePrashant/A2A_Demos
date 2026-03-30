@@ -16,8 +16,8 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-from agent_core.json_utils import parse_json_or_none, to_pretty_json
-from mcp_layer import GammaMCPClient
+from agent_core.json_utils ifrom mcp_layer import GammaMCPClient
+mport parse_json_or_none, to_pretty_json
 
 
 logger = logging.getLogger(__name__)
