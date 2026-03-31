@@ -219,6 +219,53 @@ GAMMA_MCP_SERVER_COMMAND=npx
 GAMMA_MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
 ```
 
+### 4.2.1 Create an Agent Wired to an External MCP Server
+
+1. Scaffold the agent with MCP support:
+
+```bash
+python3 ecosystem/create_agent.py gamma --port 8103 --mcp
+```
+
+2. Add MCP config in `agent_gamma/.env` (or root `.env`):
+
+```env
+GAMMA_MCP_ENABLED=true
+GAMMA_MCP_SERVER_COMMAND=npx
+GAMMA_MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
+GAMMA_MCP_TOOL_NAME=reverse_string
+GAMMA_MCP_TOOL_ARGS_JSON='{"text":"hello gamma"}'
+GAMMA_MCP_PASS_USER_QUERY=true
+GAMMA_MCP_CWD=
+```
+
+Notes:
+- `*_MCP_SERVER_ARGS` is a shell-style string parsed by `shlex.split(...)`.
+- Set `*_MCP_TOOL_NAME` to empty to list available MCP tools.
+- `*_MCP_TOOL_ARGS_JSON` must be a JSON object string. If `*_MCP_PASS_USER_QUERY=true`, the user query is passed as `text` unless you override it.
+- Use `*_MCP_CWD` if the MCP server expects a specific working directory.
+
+3. Python server example:
+
+```env
+GAMMA_MCP_SERVER_COMMAND=python3
+GAMMA_MCP_SERVER_ARGS='agent_gamma/mcp_server.py'
+```
+
+4. Global fallback keys (optional):
+
+If you prefer shared settings, you can use `MCP_*` keys instead of per-agent keys:
+
+```env
+MCP_ENABLED=true
+MCP_SERVER_COMMAND=npx
+MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
+MCP_TOOL_NAME=reverse_string
+MCP_TOOL_ARGS_JSON='{"text":"hello gamma"}'
+MCP_PASS_USER_QUERY=true
+MCP_CWD=
+```
+
 ## 5) Runtime Management + Discovery
 
 Current UI server (`ecosystem/ui_server.py`) now discovers agents automatically by combining:

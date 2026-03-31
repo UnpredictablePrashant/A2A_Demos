@@ -433,7 +433,7 @@ class {class_name}(AgentExecutor):
 
         mcp_context = await self.mcp.fetch_context(user_text)
         if mcp_context:
-            reply_text = f"{reply_text}\\n- mcp_context:\\n{mcp_context}"
+            reply_text = f"{{reply_text}}\\n- mcp_context:\\n{{mcp_context}}"
 
         updated_at, completed_at = self._complete_task(task_id, reply_text)
         final = (
@@ -538,8 +538,8 @@ class {class_name}(AgentExecutor):
                 user_input = user_text
                 if mcp_context:
                     user_input = (
-                        f"User query:\\n{user_text}\\n\\n"
-                        f"MCP context:\\n{mcp_context}\\n\\n"
+                        f"User query:\\n{{user_text}}\\n\\n"
+                        f"MCP context:\\n{{mcp_context}}\\n\\n"
                         "Use MCP context when relevant and clearly answer the user query."
                     )
                 res = await self.client.responses.create(
@@ -596,7 +596,7 @@ class {class_name}(AgentExecutor):
         if mcp_context:
             reply = (
                 "{agent_name} MCP response:\\n"
-                f"{mcp_context}"
+                f"{{mcp_context}}"
             )
         else:
             reply = (
@@ -642,8 +642,8 @@ class {class_name}(AgentExecutor):
                 user_input = user_text
                 if mcp_context:
                     user_input = (
-                        f"User query:\\n{user_text}\\n\\n"
-                        f"MCP context:\\n{mcp_context}\\n\\n"
+                        f"User query:\\n{{user_text}}\\n\\n"
+                        f"MCP context:\\n{{mcp_context}}\\n\\n"
                         "Use MCP context when relevant and clearly answer the user query."
                     )
                 res = await self.client.responses.create(

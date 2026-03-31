@@ -118,6 +118,40 @@ GAMMA_TASK_DELAY_SECONDS=3
 ECOSYSTEM_DB_PATH="ecosystem/ecosystem.db"
 ```
 
+### MCP Agent Configuration (Optional)
+
+If an agent was scaffolded with `--mcp`, you can connect it to any MCP server over stdio.
+
+Per-agent keys (recommended):
+
+```env
+GAMMA_MCP_ENABLED=true
+GAMMA_MCP_SERVER_COMMAND=npx
+GAMMA_MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
+GAMMA_MCP_TOOL_NAME=reverse_string
+GAMMA_MCP_TOOL_ARGS_JSON='{"text":"hello gamma"}'
+GAMMA_MCP_PASS_USER_QUERY=true
+GAMMA_MCP_CWD=
+```
+
+Notes:
+- `*_MCP_SERVER_ARGS` is a shell-style string parsed with `shlex.split(...)`.
+- Set `*_MCP_TOOL_NAME` empty to list tools exposed by the server.
+- `*_MCP_TOOL_ARGS_JSON` must be a JSON object string. If `*_MCP_PASS_USER_QUERY=true`, the user query is passed as `text` unless you override it.
+- Use `*_MCP_CWD` if the MCP server needs a specific working directory.
+
+Global fallback keys (optional):
+
+```env
+MCP_ENABLED=true
+MCP_SERVER_COMMAND=npx
+MCP_SERVER_ARGS='-y @modelcontextprotocol/server-everything'
+MCP_TOOL_NAME=reverse_string
+MCP_TOOL_ARGS_JSON='{"text":"hello gamma"}'
+MCP_PASS_USER_QUERY=true
+MCP_CWD=
+```
+
 ## 5) Running the System
 
 ### Option A: Interactive UI (recommended)
